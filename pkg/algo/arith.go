@@ -9,7 +9,6 @@ import "github.com/miretskiy/simba/pkg/intrinsics"
 // overhead (see str_test.go benchmark table).  On Apple M-series silicon an
 // ~128-byte threshold is optimal; tailor as needed per platform.
 func SumU8(data []byte) uint32 {
-	const simdThreshold = 128 // bytes – tweak per platform
 	if len(data) < simdThreshold {
 		var acc uint32
 		for _, b := range data {

@@ -57,6 +57,25 @@ func Sum(data []byte) uint32 {
 }
 ```
 
+To build without C tool-chain (pure Go, cross-compile friendly):
+
+```bash
+# Optionally control which FFI engine is used via Go build tags.
+
+# By default the build picks the FFI backend automatically:
+#   • If CGO is enabled -> cgo engine (lowest latency)
+#   • If CGO is disabled -> purego engine (no external tool-chain)
+#
+# Override this behaviour with explicit tags:
+#   -tags=simba_cgo      # force cgo bindings even when CGO_ENABLED=0
+#   -tags=simba_purego   # force pure-Go (purego) bindings even when CGO is on
+
+# examples
+CGO_ENABLED=0 go test -tags=simba_cgo ./...      # cross-compile but still use cgo engine
+go test -tags=simba_purego ./...                 # use purego even when CGO is enabled
+
+```
+
 ---
 
 ## 🧪 Status
