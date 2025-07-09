@@ -78,18 +78,24 @@ go test -tags=simba_purego ./...                 # use purego even when CGO is e
 
 ---
 
-## 🧪 Status
+## 🧩 Composing Intrinsics & Choosing Granularity
 
-| Feature                | Status    |
-|------------------------|-----------|
-| AVX2 / SSE Support     | ✅        |
-| ARM NEON Support       | 🚧 Planned |
-| Auto-feature detection | 🔜        |
-| CLI builder            | 🔜        |
-| Benchmarks             | ✅        |
-| WASM SIMD support      | 🚧 Exploratory |
+Calling a single SIMD kernel is cheap once the data size amortises the fixed FFI cost (≈ 30 ns via cgo, ≈ 90 ns via purego). The moment you **chain** two kernels back-to-back you pay that gateway latency twice, which can wipe out the win for small/medium slices.
 
----
+Design options:
+
+1. **Custom merged kernels (recommended)**
+   Write the exact combination you need (e.g. *lower-case + validate*). Rust’s generics/macros make adding a new symbol trivial and the call still costs one hop.
+
+2. **Batch API**
+   Pass a tiny *op-code list* to one exported function so multiple operations run inside one call. Keeps Go in charge but needs a small “mini-VM” on the Rust side.
+
+3. **Handle / pipeline builder**
+   Build the op list once, get back an opaque handle (`u64`), then execute it many times. Saves parameter marshaling but adds lifetime management.
+
+We currently expose **low-level primitives** (`validate_u8_lut`, `map_u8_lut`) that you can stitch together in Go for rapid prototyping. For production paths, prefer **option 1**—generate a bespoke kernel and export it. It scales linearly with the number of unique pipelines and keeps the public API intuitive.
+
+*(Waiting for “native Go SIMD” isn’t part of the near-term plan; the proposal has been open for years and still lacks a stable design.)*
 
 ## 🔬 Use Cases
 

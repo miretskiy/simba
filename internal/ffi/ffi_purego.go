@@ -14,6 +14,10 @@ import (
 var (
 	sumAddr   uintptr
 	asciiAddr uintptr
+	noopAddr  uintptr
+	lutAddr   uintptr
+	mapAddr   uintptr
+	tagAddr   uintptr
 )
 
 func init() {
@@ -28,6 +32,23 @@ func init() {
 		panic(err)
 	}
 	asciiAddr, err = purego.Dlsym(lib, "is_ascii")
+	if err != nil {
+		panic(err)
+	}
+
+	noopAddr, err = purego.Dlsym(lib, "noop")
+	if err != nil {
+		panic(err)
+	}
+	lutAddr, err = purego.Dlsym(lib, "validate_u8_lut")
+	if err != nil {
+		panic(err)
+	}
+	mapAddr, err = purego.Dlsym(lib, "map_u8_lut")
+	if err != nil {
+		panic(err)
+	}
+	tagAddr, err = purego.Dlsym(lib, "validate_tag_inner")
 	if err != nil {
 		panic(err)
 	}
@@ -72,5 +93,51 @@ func IsASCII(data []byte) bool {
 		uintptr(len(data)),
 	)
 
+	return r1 != 0
+}
+
+// Noop calls an empty Rust function to measure the purego FFI gateway latency.
+func Noop() {
+	purego.SyscallN(noopAddr)
+}
+
+func AllBytesInSet(data []byte, lut *[256]byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+
+	r1, _, _ := purego.SyscallN(lutAddr,
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(len(data)),
+		uintptr(unsafe.Pointer(&(*lut)[0])),
+	)
+	return r1 != 0
+}
+
+// MapBytes maps each byte of src through lut into dst. dst must be at least
+// as long as src; extra capacity is ignored. Panics if dst is too short.
+func MapBytes(dst, src []byte, lut *[256]byte) {
+	if len(src) == 0 {
+		return
+	}
+	if len(dst) < len(src) {
+		panic("ffi: MapBytes dst slice too short")
+	}
+	purego.SyscallN(mapAddr,
+		uintptr(unsafe.Pointer(&src[0])),
+		uintptr(len(src)),
+		uintptr(unsafe.Pointer(&dst[0])),
+		uintptr(unsafe.Pointer(&(*lut)[0])),
+	)
+}
+
+func ValidateTagInner(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	r1, _, _ := purego.SyscallN(tagAddr,
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(len(data)),
+	)
 	return r1 != 0
 }

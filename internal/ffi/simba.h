@@ -12,6 +12,11 @@ extern "C" {
 uint32_t sum_u8(const uint8_t *ptr, size_t len);
 // Returns 1 if all bytes are ASCII (< 128), 0 otherwise.
 uint8_t is_ascii(const uint8_t *ptr, size_t len);
+// No-op helper for measuring FFI gateway latency.
+void noop(void);
+unsigned char validate_u8_lut(const unsigned char* data, size_t len, const unsigned char* lut);
+void map_u8_lut(const unsigned char* src, size_t len, unsigned char* dst, const unsigned char* map);
+unsigned char validate_tag_inner(const unsigned char* data, size_t len);
 
 #ifdef __cplusplus
 }

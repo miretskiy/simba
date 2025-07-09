@@ -1,4 +1,6 @@
+//! Rust SIMD kernels for Simba FFI layer
 #![feature(portable_simd)]
+#![allow(unsafe_op_in_unsafe_fn)] // calls to unsafe APIs are audited and wrapped inside unsafe fns
 use core::simd::prelude::SimdUint;
 use core::simd::Simd;
 
@@ -97,6 +99,142 @@ fn is_ascii_impl(data: &[u8]) -> bool {
         }
     }
     true
+}
+
+// === Generic byte-set validator ============================================
+
+/// Returns 1 if **every** byte in the buffer indexes a non-zero entry in the
+/// 256-element lookup table `lut`.
+///
+/// `lut` is expected to be a 256-byte array where `lut[b] != 0` denotes that
+/// `b` belongs to the allowed set.  The table is treated as read-only; the
+/// function performs no bounds checks on the pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate_u8_lut(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1; // empty slice trivially passes
+    }
+
+    debug_assert!(!lut.is_null());
+
+    let data = core::slice::from_raw_parts(ptr, len);
+    let table = core::slice::from_raw_parts(lut, 256);
+
+    let mut chunks = data.chunks_exact(LANES);
+    for chunk in &mut chunks {
+        // SAFETY: chunk is exactly LANES (64) bytes.
+        let v = Simd::<u8, LANES>::from_slice(chunk);
+        // Cast to usize indices for gather.
+        let idx: Simd<usize, LANES> = v.cast();
+        // Gather 64 flags from the table; values default to 0 if out of bounds
+        // (should never happen because idx < 256).
+        let flags = Simd::<u8, LANES>::gather_or_default(table, idx);
+        // If any flag is zero, at least one byte is invalid.
+        if flags.reduce_min() == 0 {
+            return 0;
+        }
+    }
+
+    // Tail processing.
+    for &b in chunks.remainder() {
+        if table[b as usize] == 0 {
+            return 0;
+        }
+    }
+
+    1
+}
+
+// === Byte mapping via LUT ====================================================
+
+/// Copies `len` bytes from `src` to `dst`, mapping each byte through the 256-
+/// element lookup table `map` (i.e. `dst[i] = map[src[i]]`).  The regions MAY
+/// overlap, allowing in-place transformation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn map_u8_lut(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
+    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
+        return; // nothing to do or invalid pointers (debug mode will assert)
+    }
+
+    let src_slice = core::slice::from_raw_parts(src, len);
+    let dst_slice = core::slice::from_raw_parts_mut(dst, len);
+    let table = core::slice::from_raw_parts(map, 256);
+
+    let mut chunks = src_slice.chunks_exact(LANES);
+    let mut out_chunks = dst_slice.chunks_exact_mut(LANES);
+
+    for (chunk, out) in (&mut chunks).zip(&mut out_chunks) {
+        let v = Simd::<u8, LANES>::from_slice(chunk);
+        let idx: Simd<usize, LANES> = v.cast();
+        let mapped = Simd::<u8, LANES>::gather_or_default(table, idx);
+        // Write result to destination slice.
+        for i in 0..LANES {
+            out[i] = mapped[i];
+        }
+    }
+
+    // Tail processing
+    for (i, &b) in chunks.remainder().iter().enumerate() {
+        dst_slice[len - chunks.remainder().len() + i] = table[b as usize];
+    }
+}
+
+// === Tag inner validator =====================================================
+
+const VALID_TAG_LUT: [u8; 256] = {
+    let mut t = [0u8; 256];
+    // a-z
+    let mut c = b'a';
+    while c <= b'z' {
+        t[c as usize] = 1;
+        c += 1;
+    }
+    // 0-9
+    let mut d = b'0';
+    while d <= b'9' {
+        t[d as usize] = 1;
+        d += 1;
+    }
+    // punctuation
+    t[b':' as usize] = 1;
+    t[b'.' as usize] = 1;
+    t[b'/' as usize] = 1;
+    t[b'-' as usize] = 1;
+    t[b'_' as usize] = 1;
+    t
+};
+
+/// Returns 1 if every byte is allowed by VALID_TAG_LUT **and** there are no
+/// consecutive '_' characters.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate_tag_inner(ptr: *const u8, len: usize) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    let mut prev_us = false;
+    for &b in data {
+        if VALID_TAG_LUT[b as usize] == 0 {
+            return 0;
+        }
+        if b == b'_' {
+            if prev_us {
+                return 0;
+            }
+            prev_us = true;
+        } else {
+            prev_us = false;
+        }
+    }
+    1
+}
+
+// -----------------------------------------------------------------------------
+
+// FFI helper: no-op function to measure call overhead -------------------------
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn noop() {
+    // deliberately does nothing
 }
 
 #[cfg(test)]

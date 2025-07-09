@@ -10,10 +10,10 @@ echo "[SIMBA build] Building Rust static and shared libraries..."
   cd "${ROOT_DIR}/rust"
   # Build with nightly to enable portable_simd feature
   if command -v rustup >/dev/null 2>&1; then
-    cargo +nightly build --release --lib --crate-type staticlib --crate-type cdylib
+    cargo +nightly build --release --lib
   else
     echo "[WARN] rustup not found; attempting to build with default cargo (requires nightly default)" >&2
-    cargo build --release
+    cargo build --release --lib
   fi
 )
 
