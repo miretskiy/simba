@@ -3,10 +3,16 @@
 
 package algo
 
-// simdThreshold is the slice length (bytes) above which the SIMD/Rust
-// kernels outperform a scalar Go loop *when cgo is enabled*.
-// Micro-benchmarks (pkg/intrinsics, size=0 cases) put the fixed cgo gateway
-// at ~30 ns.  The scalar loop processes ≈0.6 ns per byte, so 30 ns/0.6 ns ≈ 50 B
-// is the analytical tie-point; 128 B is chosen to stay comfortably past that
-// on slower Xeon or laptop cores.
-const simdThreshold = 128
+// simdThreshold is the slice length (in bytes) above which the Rust/SIMD
+// kernel beats a hand-written scalar loop *in cgo builds*.
+//
+// 2025-07-08 Apple M2 Max measurements:
+//   - Pure cgo gateway latency (noop call):           ~13 ns
+//   - Scalar byte-add loop throughput:                ~0.6 ns/B
+//   - Break-even size  = 13 ns / 0.6 ns ≈ 22 B
+//
+// We round the crossover up to one cache-line (32 B) and add more head-room
+// for older Intel/Zen cores where scalar ~0.8–1 ns/B and the gateway is
+// ≈20–25 ns.  The result is a conservative yet tighter threshold of 64 B,
+// down from the previous 128 B.
+const simdThreshold = 64

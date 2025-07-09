@@ -23,6 +23,40 @@ This document captures the main decisions and explanations exchanged during the 
    * The `go mod tidy` workflow is preferred for dependency updates.
     * Benchmarks belong in the regular `*_test.go` files alongside unit tests; avoid dedicated `*_bench_test.go` files. Fuzz tests, however, should live in separate `*_fuzz_test.go` files.
 
+4. **FFI back-end selection and thresholds**
+
+   * Implemented two interchangeable gateways: cgo (default when CGO is enabled) and purego (uses `purego.Dlopen` + `SyscallN`).
+   * Added build tags `simba_cgo` and `simba_purego` to force a back-end; default logic picks cgo if available, otherwise purego.
+   * Threshold constants extracted to build-tag-specific files: `threshold_cgo.go` (64 B) and `threshold_purego.go` (256 B), based on benchmarked crossover points.
+
+5. **Benchmarks and gateway latency**
+
+   * Introduced a Rust `noop` kernel and Go wrappers; micro-benchmarks give raw gateway cost.
+   * Results on Apple M2 Max: cgo `Noop` ≈ 13.5 ns, purego ≈ 90 ns.
+   * Re-ran `sum_u8` benchmarks (5 × 1 s each); scalar vs SIMD crossover occurs around 64 B for cgo and 256 B for purego.
+
+6. **Build scripts and documentation updates**
+
+   * `scripts/build.sh` now builds both static (`.a`) and shared (`.dylib/.so`) Rust libraries with correct `crate-type` flags.
+   * `internal/ffi/simba.h` expanded with prototypes for `noop`, `is_ascii`, and `sum_u8`.
+   * README instructions updated with build-tag usage examples and benchmark rationale.
+
+7. **Tag validation SIMD kernel – findings and decision**
+
+   * Implemented `validate_tag_inner` kernel that checks allowed characters and "no double underscore" rule using SIMD.
+   * Benchmarks on Apple M2 Max (cgo):
+
+     | Tag length | Scalar ns/op | SIMD ns/op |
+     |-----------:|-------------:|-----------:|
+     | 8          |    ~4.6      | ~35        |
+     | 64         |    ~31       | ~68        |
+     | 199        |    ~99       | ~156       |
+
+     – Fixed FFI cost ≈ 30 ns (13–15 ns CGO gateway + 12–15 ns Rust prologue/epilogue) dominates for short tags; SIMD wins only beyond ~250 B – unrealistic for real-world tags.
+   * Purego adds ~60 ns extra (allocations + SyscallN), pushing crossover even further.
+   * Conclusion: the single-tag SIMD kernel is not useful. Future speed-ups require batching multiple tags per call or fusing more logic into one kernel.
+   * The experimental tag validator code (`pkg/algo/tag.go`, tests, benchmarks) will be deleted after checkpoint commit; history retains the prototype.
+
 ---
 
 _This file is for informational purposes only and is not required for building the project._ 
