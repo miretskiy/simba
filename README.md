@@ -1,6 +1,6 @@
 # 🦁 SIMBA - SIMD Binary Accelerator
 
-**SIMBA** (SIMD Binary Accelerator) is a high-performance runtime and tooling layer that empowers **Go applications** to leverage **SIMD** (Single Instruction, Multiple Data) through **Rust intrinsics** and **CGo**.
+**SIMBA** (SIMD Binary Accelerator) is a high-performance runtime and tooling layer that lets **Go binaries** call **Rust SIMD intrinsics** _without_ CGO.
 
 Whether you're building data-intensive pipelines, number-crunching algorithms, or real-time systems, SIMBA lets your Go code *roar* with the speed of native vectorized instructions — without sacrificing code clarity or portability.
 
@@ -10,7 +10,7 @@ Whether you're building data-intensive pipelines, number-crunching algorithms, o
 
 - 🧠 **Simple interface** – Access powerful SIMD instructions from Go via intuitive wrappers.
 - ⚙️ **Powered by Rust** – Leverages mature SIMD support in Rust for portability and safety.
-- 🦾 **No assembly needed** – Write expressive Go code, while SIMBA handles the dirty bits.
+- 🦾 **No CGO needed** – one tiny assembly shim per function, no external linker or `cc` tool-chain.
 - 🛠 **Tooling included** – Optional CLI tooling to build, inspect, and test SIMD-accelerated modules.
 - 📦 **Modular** – Use SIMD intrinsics where you need them, and fall back to pure Go when you don’t.
 
@@ -18,10 +18,14 @@ Whether you're building data-intensive pipelines, number-crunching algorithms, o
 
 ## 🛠 How It Works
 
-SIMBA compiles **Rust functions** that use platform-specific `std::arch` intrinsics and exposes them via a **C ABI**, which is then invoked from Go using **CGo**. This allows SIMD-capable hot paths to be written in Rust while keeping the rest of your app in idiomatic Go.
+SIMBA compiles **Rust functions** into a position-independent static
+library, renames it to `*.syso`, and the Go linker treats it like a
+native object.  A 3-instruction assembly **trampoline** (one per
+function) bridges Go’s internal ABI to the System-V / AAPCS64 calling
+convention – no cgo, no dynamic loader, ~2 ns overhead.
 
 ```
-[ Go Code ] <-- CGo --> [ C ABI Shim ] <-- FFI --> [ Rust SIMD ]
+[ Go Code ] --asm shim--> [ .syso object ] --> [ Rust SIMD ]
 ```
 
 ---
@@ -46,41 +50,32 @@ pub extern "C" fn sum_u8_avx2(ptr: *const u8, len: usize) -> u32 {
 ### 3. Call it from Go
 
 ```go
-/*
-#cgo LDFLAGS: -L${SRCDIR}/target/release -lsimba
-#include "simba.h"
-*/
-import "C"
+package algo
 
-func Sum(data []byte) uint32 {
-    return uint32(C.sum_u8_avx2((*C.uchar)(unsafe.Pointer(&data[0])), C.size_t(len(data))))
+//go:generate go run ./internal/ffi   // rebuilds *.syso archive
+
+// SumU8 adds a slice of bytes via SIMD.
+func SumU8(b []byte) uint32 {
+    if len(b) == 0 {
+        return 0
+    }
+    return ffi.SumU8(b) // ~2 ns call-return
 }
 ```
 
-To build without C tool-chain (pure Go, cross-compile friendly):
+No build tags needed – **SIMBA always builds with CGO disabled**.  The
+`go generate ./internal/ffi` step produces two files:
 
-```bash
-# Optionally control which FFI engine is used via Go build tags.
+* `libsimba_darwin_amd64.syso`
+* `libsimba_darwin_arm64.syso`
 
-# By default the build picks the FFI backend automatically:
-#   • If CGO is enabled -> cgo engine (lowest latency)
-#   • If CGO is disabled -> purego engine (no external tool-chain)
-#
-# Override this behaviour with explicit tags:
-#   -tags=simba_cgo      # force cgo bindings even when CGO_ENABLED=0
-#   -tags=simba_purego   # force pure-Go (purego) bindings even when CGO is on
-
-# examples
-CGO_ENABLED=0 go test -tags=simba_cgo ./...      # cross-compile but still use cgo engine
-go test -tags=simba_purego ./...                 # use purego even when CGO is enabled
-
-```
+They are auto-linked by the Go tool-chain on any platform.
 
 ---
 
 ## 🧩 Composing Intrinsics & Choosing Granularity
 
-Calling a single SIMD kernel is cheap once the data size amortises the fixed FFI cost (≈ 30 ns via cgo, ≈ 90 ns via purego). The moment you **chain** two kernels back-to-back you pay that gateway latency twice, which can wipe out the win for small/medium slices.
+Calling a single SIMD kernel is cheap once the data size amortises the fixed FFI cost (~2 ns via the syso trampoline). The moment you **chain** two kernels back-to-back you pay that gateway latency twice, which can wipe out the win for small/medium slices.
 
 Design options:
 
