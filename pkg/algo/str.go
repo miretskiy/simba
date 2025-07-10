@@ -6,15 +6,11 @@ import "github.com/miretskiy/simba/pkg/intrinsics"
 // tiny slices and the SIMD-accelerated intrinsic for larger inputs.
 //
 // The actual threshold is held in the build-tag–specific constant
-// `simdThreshold` (see threshold_cgo.go and threshold_purego.go).
-//   - cgo build:   simdThreshold = 128  // cgo gateway ≈30 ns per call¹
-//   - purego build: simdThreshold = 256 // purego SyscallN path ≈90 ns per call
+// `simdThreshold` (see threshold_cgo.go).
 //
-// ¹ The ~30 ns figure comes from the intrinsics micro-benchmarks in
-//
-//	pkg/intrinsics/str_test.go (size=0 cases).  With purego the same
-//	benchmark reports ~0.3 ns, so the crossover can be pushed down to one
-//	cache-line (32 B).
+//	– In cgo builds the fixed FFI cost is ≈13 ns on Apple M2 Max, making
+//	  64 B a safe crossover.  On x86 the cost is a bit higher (~20 ns) but
+//	  64 B is still conservative.
 func IsASCII(data []byte) bool {
 	if len(data) < simdThreshold {
 		for _, b := range data {

@@ -1,5 +1,5 @@
-//go:build simba_cgo || (cgo && !simba_purego)
-// +build simba_cgo cgo,!simba_purego
+//go:build cgo || simba_cgo
+// +build cgo simba_cgo
 
 // Package ffi provides Go bindings to the Rust simba library.
 //

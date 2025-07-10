@@ -12,7 +12,7 @@ func pbench(b *testing.B, f func()) {
 }
 
 // BenchmarkNoop measures the overhead of calling the empty Rust function
-// through the current FFI backend (cgo or purego).
+// through the active FFI backend (cgo).
 func BenchmarkNoop(b *testing.B) {
 	pbench(b, Noop)
 }
