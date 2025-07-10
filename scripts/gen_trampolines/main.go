@@ -21,7 +21,10 @@ var typeSize = map[string]int{
 	"*byte":   8,
 	"uintptr": 8,
 	"uint32":  4,
-	"uint8":   1,
+	"uint8":   8, // treat as uintptr size to maintain 8-byte alignment in FP frame
+	"*uint16": 8,
+	"*uint32": 8,
+	"*uint64": 8,
 }
 
 func sizeOf(t string) int {

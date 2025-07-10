@@ -1,4 +1,4 @@
-// This file exposes the same public API as ffi.go but is implemented via a
+// Package ffi exposes the same public API as ffi.go but is implemented via a
 // static, position-independent object (`libsimba.syso`) linked directly by the
 // Go tool-chain.  The foreign code is the Rust SIMD crate in ../../rust.
 //
@@ -42,6 +42,14 @@ func SumU8_64(data []byte) uint32 {
 	return sum_u8_64_raw(&data[0], uintptr(len(data)))
 }
 
+// SumU8_16 adds all bytes using a 16-lane SIMD kernel.
+func SumU8_16(data []byte) uint32 {
+	if len(data) == 0 {
+		return 0
+	}
+	return sum_u8_16_raw(&data[0], uintptr(len(data)))
+}
+
 // IsASCII32 returns 1 if every byte in data < 0x80 using the 32-lane kernel.
 func IsASCII32(data []byte) bool {
 	if len(data) == 0 {
@@ -58,6 +66,14 @@ func IsASCII64(data []byte) bool {
 	return is_ascii64_raw(&data[0], uintptr(len(data))) != 0
 }
 
+// IsASCII16 returns true if every byte < 0x80 using the 16-lane kernel.
+func IsASCII16(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	return is_ascii16_raw(&data[0], uintptr(len(data))) != 0
+}
+
 // AllBytesInSet32 validates data via LUT using 32 lanes.
 func AllBytesInSet32(data []byte, lut *[256]byte) bool {
 	if len(data) == 0 {
@@ -72,6 +88,14 @@ func AllBytesInSet64(data []byte, lut *[256]byte) bool {
 		return true
 	}
 	return validate_u8_lut64_raw(&data[0], uintptr(len(data)), &lut[0]) != 0
+}
+
+// AllBytesInSet16 validates data via LUT using 16 lanes.
+func AllBytesInSet16(data []byte, lut *[256]byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	return validate_u8_lut16_raw(&data[0], uintptr(len(data)), &lut[0]) != 0
 }
 
 // MapBytes32 maps src through lut into dst using 32-lane kernel.
@@ -94,6 +118,51 @@ func MapBytes64(dst, src []byte, lut *[256]byte) {
 		panic("ffi: MapBytes dst slice too short")
 	}
 	map_u8_lut64_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
+}
+
+// MapBytes16 maps src through lut into dst using 16-lane kernel.
+func MapBytes16(dst, src []byte, lut *[256]byte) {
+	if len(src) == 0 {
+		return
+	}
+	if len(dst) < len(src) {
+		panic("ffi: MapBytes dst slice too short")
+	}
+	map_u8_lut16_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
+}
+
+// EqU8Masks32 fills out with 32-lane equality masks. It returns the number of
+// mask words written (⩵ len(data)/32).
+func EqU8Masks32(data []byte, needle byte, out []uint32) int {
+	if len(data) == 0 {
+		return 0
+	}
+	if len(out) < len(data)/32 {
+		panic("ffi: EqU8Masks32 out slice too short")
+	}
+	return int(eq_u8_masks32_raw(&data[0], uintptr(len(data)), needle, &out[0]))
+}
+
+// EqU8Masks64 variant using 64-lane kernel and u64 masks.
+func EqU8Masks64(data []byte, needle byte, out []uint64) int {
+	if len(data) == 0 {
+		return 0
+	}
+	if len(out) < len(data)/64 {
+		panic("ffi: EqU8Masks64 out slice too short")
+	}
+	return int(eq_u8_masks64_raw(&data[0], uintptr(len(data)), needle, &out[0]))
+}
+
+// EqU8Masks16 variant using 16-lane kernel and u16 masks.
+func EqU8Masks16(data []byte, needle byte, out []uint16) int {
+	if len(data) == 0 {
+		return 0
+	}
+	if len(out) < len(data)/16 {
+		panic("ffi: EqU8Masks16 out slice too short")
+	}
+	return int(eq_u8_masks16_raw(&data[0], uintptr(len(data)), needle, &out[0]))
 }
 
 //go:noinline
@@ -125,11 +194,19 @@ func sum_u8_64_raw(ptr *byte, n uintptr) uint32
 
 //simba:trampoline amd64 arm64
 //go:noescape
+func sum_u8_16_raw(ptr *byte, n uintptr) uint32
+
+//simba:trampoline amd64 arm64
+//go:noescape
 func is_ascii32_raw(ptr *byte, n uintptr) uint8
 
 //simba:trampoline amd64 arm64
 //go:noescape
 func is_ascii64_raw(ptr *byte, n uintptr) uint8
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func is_ascii16_raw(ptr *byte, n uintptr) uint8
 
 //simba:trampoline amd64 arm64
 //go:noescape
@@ -141,11 +218,31 @@ func validate_u8_lut64_raw(ptr *byte, n uintptr, lut *byte) uint8
 
 //simba:trampoline amd64 arm64
 //go:noescape
+func validate_u8_lut16_raw(ptr *byte, n uintptr, lut *byte) uint8
+
+//simba:trampoline amd64 arm64
+//go:noescape
 func map_u8_lut32_raw(src *byte, n uintptr, dst *byte, lut *byte)
 
 //simba:trampoline amd64 arm64
 //go:noescape
 func map_u8_lut64_raw(src *byte, n uintptr, dst *byte, lut *byte)
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func map_u8_lut16_raw(src *byte, n uintptr, dst *byte, lut *byte)
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func eq_u8_masks32_raw(src *byte, n uintptr, needle uint8, out *uint32) uintptr
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func eq_u8_masks64_raw(src *byte, n uintptr, needle uint8, out *uint64) uintptr
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func eq_u8_masks16_raw(src *byte, n uintptr, needle uint8, out *uint16) uintptr
 
 //simba:trampoline amd64 arm64
 //go:noescape

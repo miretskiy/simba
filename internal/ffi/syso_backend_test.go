@@ -93,3 +93,37 @@ func TestNoop(t *testing.T) {
 	// Simply make sure it links and can be called.
 	Noop()
 }
+
+func TestEqU8Masks(t *testing.T) {
+	// Build source buffers with a few '_' bytes so masks are non-zero.
+	src16 := make([]byte, 16)
+	for i := range src16 {
+		src16[i] = 'a'
+	}
+	src16[0] = '_'
+	src16[3] = '_'
+
+	src32 := make([]byte, 32)
+	copy(src32, append(src16, src16...))
+
+	src64 := make([]byte, 64)
+	copy(src64, append(src32, src32...))
+
+	// Expected bitmasks
+	want16 := uint16((1 << 0) | (1 << 3))
+	want32 := uint32(want16) | uint32(want16)<<16
+	want64 := uint64(want32) | uint64(want32)<<32
+
+	out16 := make([]uint16, 1)
+	out32 := make([]uint32, 1) // 32/32 =1 mask word
+	out64 := make([]uint64, 1)
+
+	require.Equal(t, 1, EqU8Masks16(src16, '_', out16))
+	require.Equal(t, want16, out16[0])
+
+	require.Equal(t, 1, EqU8Masks32(src32, '_', out32))
+	require.Equal(t, want32, out32[0])
+
+	require.Equal(t, 1, EqU8Masks64(src64, '_', out64))
+	require.Equal(t, want64, out64[0])
+}
