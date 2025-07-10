@@ -6,8 +6,6 @@ use core::simd::{LaneCount, Simd, SupportedLaneCount};
 
 // === Portable SIMD byte-sum ===================================================
 
-// no module-level LANES constant; tests use explicit 64.
-
 // ---- Generic helpers --------------------------------------------------------
 
 #[inline(always)]
@@ -29,25 +27,32 @@ where
     (total & 0xFFFF_FFFF) as u32
 }
 
-/* ─── 32-lane and 64-lane public exports ─────────────────────────────────── */
+/* ─── sum_u8 public exports generated via macro ──────────────────────────── */
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sum_u8_32(ptr: *const u8, len: usize) -> u32 {
-    if ptr.is_null() || len == 0 {
-        return 0;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    sum_u8_impl::<32>(data)
+/// Generates thin extern "C" wrappers around `sum_u8_impl` for a given lane
+/// width. Mirrors style of `export_eq_masks!`.
+macro_rules! export_sum_u8 {
+    ($name:ident, $lanes:expr) => {
+        #[doc = concat!(
+            "Sum the bytes in `data` using a ", stringify!($lanes), "-lane portable SIMD kernel and return the running total modulo 2^32.\n\n",
+            "# Safety\n",
+            "• `ptr` must be either null or valid for `len` bytes.\n",
+            "• The buffer must not be mutated for the duration of the call."
+        )]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(ptr: *const u8, len: usize) -> u32 {
+            if ptr.is_null() || len == 0 {
+                return 0;
+            }
+            let data = core::slice::from_raw_parts(ptr, len);
+            sum_u8_impl::<$lanes>(data)
+        }
+    };
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sum_u8_64(ptr: *const u8, len: usize) -> u32 {
-    if ptr.is_null() || len == 0 {
-        return 0;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    sum_u8_impl::<64>(data)
-}
+export_sum_u8!(sum_u8_16, 16);
+export_sum_u8!(sum_u8_32, 32);
+export_sum_u8!(sum_u8_64, 64);
 
 // -----------------------------------------------------------------------------
 
@@ -66,27 +71,27 @@ where
     chunks.remainder().iter().all(|&b| b < 0x80)
 }
 
-/* ─── 32-lane symbol ───────────────────────────────────── */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn is_ascii32(ptr: *const u8, len: usize) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    is_ascii_impl::<32>(data) as u8
+/* ─── is_ascii public exports via macro ─────────────────────────────────── */
+macro_rules! export_is_ascii {
+    ($name:ident, $lanes:expr) => {
+        #[doc = concat!(
+            "Return 1 if all bytes are ASCII (< 0x80) using a ", stringify!($lanes), "-lane SIMD kernel, 0 otherwise.\n\n",
+            "# Safety\n",
+            "Same as other FFI helpers: `ptr` must be null or valid for `len` bytes."
+        )]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(ptr: *const u8, len: usize) -> u8 {
+            if ptr.is_null() || len == 0 {
+                return 1;
+            }
+            let data = core::slice::from_raw_parts(ptr, len);
+            is_ascii_impl::<$lanes>(data) as u8
+        }
+    };
 }
-
-/* ─── 64-lane symbol ───────────────────────────────────── */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn is_ascii64(ptr: *const u8, len: usize) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    is_ascii_impl::<64>(data) as u8
-}
-
-// legacy alias removed
+export_is_ascii!(is_ascii16, 16);
+export_is_ascii!(is_ascii32, 32);
+export_is_ascii!(is_ascii64, 64);
 
 // === Generic byte-set validator ============================================
 
@@ -112,27 +117,28 @@ where
     true
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn validate_u8_lut32(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    let table = core::slice::from_raw_parts(lut, 256);
-    validate_u8_lut_impl::<32>(data, table) as u8
+/* ─── validate_u8_lut exports via macro ─────────────────────────────────── */
+macro_rules! export_validate_u8_lut {
+    ($name:ident, $lanes:expr) => {
+        #[doc = concat!(
+            "Validate every byte against a 256-byte lookup table using a ", stringify!($lanes), "-lane SIMD kernel. Non-zero table entry marks valid byte. Returns 1 on success, 0 on first mismatch.\n\n",
+            "# Safety\n",
+            "• `ptr`/`lut` must be valid for `len`/256 bytes respectively."
+        )]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
+            if ptr.is_null() || len == 0 {
+                return 1;
+            }
+            let data = core::slice::from_raw_parts(ptr, len);
+            let table = core::slice::from_raw_parts(lut, 256);
+            validate_u8_lut_impl::<$lanes>(data, table) as u8
+        }
+    };
 }
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn validate_u8_lut64(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    let table = core::slice::from_raw_parts(lut, 256);
-    validate_u8_lut_impl::<64>(data, table) as u8
-}
-
-// legacy alias removed
+export_validate_u8_lut!(validate_u8_lut16, 16);
+export_validate_u8_lut!(validate_u8_lut32, 32);
+export_validate_u8_lut!(validate_u8_lut64, 64);
 
 // === Byte mapping via LUT ====================================================
 
@@ -165,23 +171,26 @@ unsafe fn map_u8_lut_impl<const L: usize>(
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn map_u8_lut32(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
-    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
-        return;
-    }
-    map_u8_lut_impl::<32>(src, len, dst, map);
+/* ─── map_u8_lut exports via macro ───────────────────────────────────────── */
+macro_rules! export_map_u8_lut {
+    ($name:ident, $lanes:expr) => {
+        #[doc = concat!(
+            "Map each source byte through a 256-byte translation table using a ", stringify!($lanes), "-lane SIMD kernel and write results to `dst`.\n\n",
+            "# Safety\n",
+            "All pointers must be non-null and valid for `len` bytes. Buffers may overlap."
+        )]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
+            if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
+                return;
+            }
+            map_u8_lut_impl::<$lanes>(src, len, dst, map);
+        }
+    };
 }
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn map_u8_lut64(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
-    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
-        return;
-    }
-    map_u8_lut_impl::<64>(src, len, dst, map);
-}
-
-// legacy alias removed
+export_map_u8_lut!(map_u8_lut16, 16);
+export_map_u8_lut!(map_u8_lut32, 32);
+export_map_u8_lut!(map_u8_lut64, 64);
 
 // === Byte equality mask =====================================================
 
@@ -213,8 +222,15 @@ where
     chunks
 }
 
+// Generic helper: generates a thin extern "C" wrapper that validates pointers
+// Export helper specific to eq_u8_masks kernels (16/32/64 lanes)
 macro_rules! export_eq_masks {
     ($name:ident, $lanes:expr, $int:ty) => {
+        #[doc = concat!(
+            "Generate equality bitmasks comparing each byte to `needle` across chunks of ", stringify!($lanes), " lanes. The resulting mask words are stored in `out`. Returns number of mask words written.\n\n",
+            "# Safety\n",
+            "`src` and `out` must be valid for `len` and `len/", stringify!($lanes), "` elements respectively."
+        )]
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $name(
             src: *const u8,
@@ -240,44 +256,6 @@ export_eq_masks!(eq_u8_masks64, 64, u64);
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn noop() {
     // deliberately does nothing
-}
-
-// ─── 16-lane public exports ───────────────────────────────────────────────
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sum_u8_16(ptr: *const u8, len: usize) -> u32 {
-    if ptr.is_null() || len == 0 {
-        return 0;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    sum_u8_impl::<16>(data)
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn is_ascii16(ptr: *const u8, len: usize) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    is_ascii_impl::<16>(data) as u8
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn validate_u8_lut16(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    let table = core::slice::from_raw_parts(lut, 256);
-    validate_u8_lut_impl::<16>(data, table) as u8
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn map_u8_lut16(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
-    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
-        return;
-    }
-    map_u8_lut_impl::<16>(src, len, dst, map);
 }
 
 #[cfg(test)]
@@ -338,12 +316,45 @@ mod tests {
             assert_eq!(super::is_ascii32(core::ptr::null(), 0), 1);
         }
     }
+
+    #[test]
+    fn test_map_u8_lut_basic() {
+        // Mapping table: invert each byte (x -> 255 - x)
+        let map: Vec<u8> = (0..=255u16).map(|b| 255u8.wrapping_sub(b as u8)).collect();
+        let src: Vec<u8> = (0..=255u16).map(|b| b as u8).collect();
+        let mut dst16 = vec![0u8; src.len()];
+        let mut dst32 = vec![0u8; src.len()];
+        let mut dst64 = vec![0u8; src.len()];
+        unsafe {
+            super::map_u8_lut16(src.as_ptr(), src.len(), dst16.as_mut_ptr(), map.as_ptr());
+            super::map_u8_lut32(src.as_ptr(), src.len(), dst32.as_mut_ptr(), map.as_ptr());
+            super::map_u8_lut64(src.as_ptr(), src.len(), dst64.as_mut_ptr(), map.as_ptr());
+        }
+        let expected: Vec<u8> = src.iter().map(|&b| 255 - b).collect();
+        assert_eq!(dst16, expected, "16-lane mapping failed");
+        assert_eq!(dst32, expected, "32-lane mapping failed");
+        assert_eq!(dst64, expected, "64-lane mapping failed");
+    }
+
+    #[test]
+    fn test_map_u8_lut_various_lengths() {
+        let map: Vec<u8> = (0..=255u16).map(|b| (b as u8).wrapping_add(1)).collect(); // simple +1 mapping
+        let lengths = [0usize, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 255, 1023];
+        for &len in &lengths {
+            let src: Vec<u8> = (0..len as u32).map(|i| (i % 256) as u8).collect();
+            let mut dst = vec![0u8; len];
+            unsafe {
+                super::map_u8_lut64(src.as_ptr(), len, dst.as_mut_ptr(), map.as_ptr());
+            }
+            for i in 0..len {
+                assert_eq!(dst[i], src[i].wrapping_add(1), "idx {} len {}", i, len);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod mask_tests {
-    use super::*;
-
     fn scalar_mask(chunk: &[u8], needle: u8) -> u128 {
         let mut m = 0u128;
         for (i, &b) in chunk.iter().enumerate() {
@@ -353,7 +364,6 @@ mod mask_tests {
         }
         m
     }
-
     #[test]
     fn test_eq_u8_masks_basic() {
         let data: Vec<u8> = (0..128u16).map(|i| (i % 256) as u8).collect();
