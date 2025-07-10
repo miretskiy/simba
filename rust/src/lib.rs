@@ -179,56 +179,6 @@ pub unsafe extern "C" fn map_u8_lut(src: *const u8, len: usize, dst: *mut u8, ma
     }
 }
 
-// === Tag inner validator =====================================================
-
-const VALID_TAG_LUT: [u8; 256] = {
-    let mut t = [0u8; 256];
-    // a-z
-    let mut c = b'a';
-    while c <= b'z' {
-        t[c as usize] = 1;
-        c += 1;
-    }
-    // 0-9
-    let mut d = b'0';
-    while d <= b'9' {
-        t[d as usize] = 1;
-        d += 1;
-    }
-    // punctuation
-    t[b':' as usize] = 1;
-    t[b'.' as usize] = 1;
-    t[b'/' as usize] = 1;
-    t[b'-' as usize] = 1;
-    t[b'_' as usize] = 1;
-    t
-};
-
-/// Returns 1 if every byte is allowed by VALID_TAG_LUT **and** there are no
-/// consecutive '_' characters.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn validate_tag_inner(ptr: *const u8, len: usize) -> u8 {
-    if ptr.is_null() || len == 0 {
-        return 1;
-    }
-    let data = core::slice::from_raw_parts(ptr, len);
-    let mut prev_us = false;
-    for &b in data {
-        if VALID_TAG_LUT[b as usize] == 0 {
-            return 0;
-        }
-        if b == b'_' {
-            if prev_us {
-                return 0;
-            }
-            prev_us = true;
-        } else {
-            prev_us = false;
-        }
-    }
-    1
-}
-
 // -----------------------------------------------------------------------------
 
 // FFI helper: no-op function to measure call overhead -------------------------

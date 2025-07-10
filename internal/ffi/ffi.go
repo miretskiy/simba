@@ -66,17 +66,3 @@ func MapBytes(dst, src []byte, lut *[256]byte) {
 		(*C.uchar)(unsafe.Pointer(&(*lut)[0])),
 	)
 }
-
-// ValidateTagInner checks that all bytes are allowed tag chars and no double
-// underscores appear. It assumes the first and last byte have already been
-// validated by the caller.
-func ValidateTagInner(data []byte) bool {
-	if len(data) == 0 {
-		return true
-	}
-	res := C.validate_tag_inner(
-		(*C.uchar)(unsafe.Pointer(&data[0])),
-		C.size_t(len(data)),
-	)
-	return res != 0
-}

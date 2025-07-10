@@ -16,7 +16,6 @@ uint8_t is_ascii(const uint8_t *ptr, size_t len);
 void noop(void);
 unsigned char validate_u8_lut(const unsigned char* data, size_t len, const unsigned char* lut);
 void map_u8_lut(const unsigned char* src, size_t len, unsigned char* dst, const unsigned char* map);
-unsigned char validate_tag_inner(const unsigned char* data, size_t len);
 
 #ifdef __cplusplus
 }
