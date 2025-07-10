@@ -20,6 +20,14 @@ TEXT ·sum_u8_64_raw(SB), NOSPLIT, $0-20
     MOVL AX, ret+16(FP)
     RET
 
+// func sum_u8_16_raw() uint32
+TEXT ·sum_u8_16_raw(SB), NOSPLIT, $0-20
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    CALL sum_u8_16(SB)
+    MOVL AX, ret+16(FP)
+    RET
+
 // func is_ascii32_raw() uint8
 TEXT ·is_ascii32_raw(SB), NOSPLIT, $0-17
     MOVQ ptr+0(FP), DI
@@ -33,6 +41,14 @@ TEXT ·is_ascii64_raw(SB), NOSPLIT, $0-17
     MOVQ ptr+0(FP), DI
     MOVQ n+8(FP), SI
     CALL is_ascii64(SB)
+    MOVB AL, ret+16(FP)
+    RET
+
+// func is_ascii16_raw() uint8
+TEXT ·is_ascii16_raw(SB), NOSPLIT, $0-17
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    CALL is_ascii16(SB)
     MOVB AL, ret+16(FP)
     RET
 
@@ -54,6 +70,15 @@ TEXT ·validate_u8_lut64_raw(SB), NOSPLIT, $0-25
     MOVB AL, ret+24(FP)
     RET
 
+// func validate_u8_lut16_raw() uint8
+TEXT ·validate_u8_lut16_raw(SB), NOSPLIT, $0-25
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVQ lut+16(FP), DX
+    CALL validate_u8_lut16(SB)
+    MOVB AL, ret+24(FP)
+    RET
+
 // func map_u8_lut32_raw()
 TEXT ·map_u8_lut32_raw(SB), NOSPLIT, $0-32
     MOVQ src+0(FP), DI
@@ -70,6 +95,45 @@ TEXT ·map_u8_lut64_raw(SB), NOSPLIT, $0-32
     MOVQ dst+16(FP), DX
     MOVQ lut+24(FP), CX
     CALL map_u8_lut64(SB)
+    RET
+
+// func map_u8_lut16_raw()
+TEXT ·map_u8_lut16_raw(SB), NOSPLIT, $0-32
+    MOVQ src+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVQ dst+16(FP), DX
+    MOVQ lut+24(FP), CX
+    CALL map_u8_lut16(SB)
+    RET
+
+// func eq_u8_masks32_raw() uintptr
+TEXT ·eq_u8_masks32_raw(SB), NOSPLIT, $0-40
+    MOVQ src+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVQ needle+16(FP), DX
+    MOVQ out+24(FP), CX
+    CALL eq_u8_masks32(SB)
+    MOVL AX, ret+32(FP)
+    RET
+
+// func eq_u8_masks64_raw() uintptr
+TEXT ·eq_u8_masks64_raw(SB), NOSPLIT, $0-40
+    MOVQ src+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVQ needle+16(FP), DX
+    MOVQ out+24(FP), CX
+    CALL eq_u8_masks64(SB)
+    MOVL AX, ret+32(FP)
+    RET
+
+// func eq_u8_masks16_raw() uintptr
+TEXT ·eq_u8_masks16_raw(SB), NOSPLIT, $0-40
+    MOVQ src+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVQ needle+16(FP), DX
+    MOVQ out+24(FP), CX
+    CALL eq_u8_masks16(SB)
+    MOVL AX, ret+32(FP)
     RET
 
 // func noop_raw()

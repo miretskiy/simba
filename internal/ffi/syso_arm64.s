@@ -20,6 +20,14 @@ TEXT ·sum_u8_64_raw(SB), NOSPLIT, $0-20
     MOVW R0, ret+16(FP)
     RET
 
+// func sum_u8_16_raw() uint32
+TEXT ·sum_u8_16_raw(SB), NOSPLIT, $0-20
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    CALL sum_u8_16(SB)
+    MOVW R0, ret+16(FP)
+    RET
+
 // func is_ascii32_raw() uint8
 TEXT ·is_ascii32_raw(SB), NOSPLIT, $0-17
     MOVD ptr+0(FP), R0
@@ -33,6 +41,14 @@ TEXT ·is_ascii64_raw(SB), NOSPLIT, $0-17
     MOVD ptr+0(FP), R0
     MOVD n+8(FP), R1
     CALL is_ascii64(SB)
+    MOVBU R0, ret+16(FP)
+    RET
+
+// func is_ascii16_raw() uint8
+TEXT ·is_ascii16_raw(SB), NOSPLIT, $0-17
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    CALL is_ascii16(SB)
     MOVBU R0, ret+16(FP)
     RET
 
@@ -54,6 +70,15 @@ TEXT ·validate_u8_lut64_raw(SB), NOSPLIT, $0-25
     MOVBU R0, ret+24(FP)
     RET
 
+// func validate_u8_lut16_raw() uint8
+TEXT ·validate_u8_lut16_raw(SB), NOSPLIT, $0-25
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVD lut+16(FP), R2
+    CALL validate_u8_lut16(SB)
+    MOVBU R0, ret+24(FP)
+    RET
+
 // func map_u8_lut32_raw()
 TEXT ·map_u8_lut32_raw(SB), NOSPLIT, $0-32
     MOVD src+0(FP), R0
@@ -70,6 +95,45 @@ TEXT ·map_u8_lut64_raw(SB), NOSPLIT, $0-32
     MOVD dst+16(FP), R2
     MOVD lut+24(FP), R3
     CALL map_u8_lut64(SB)
+    RET
+
+// func map_u8_lut16_raw()
+TEXT ·map_u8_lut16_raw(SB), NOSPLIT, $0-32
+    MOVD src+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVD dst+16(FP), R2
+    MOVD lut+24(FP), R3
+    CALL map_u8_lut16(SB)
+    RET
+
+// func eq_u8_masks32_raw() uintptr
+TEXT ·eq_u8_masks32_raw(SB), NOSPLIT, $0-40
+    MOVD src+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVD needle+16(FP), R2
+    MOVD out+24(FP), R3
+    CALL eq_u8_masks32(SB)
+    MOVW R0, ret+32(FP)
+    RET
+
+// func eq_u8_masks64_raw() uintptr
+TEXT ·eq_u8_masks64_raw(SB), NOSPLIT, $0-40
+    MOVD src+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVD needle+16(FP), R2
+    MOVD out+24(FP), R3
+    CALL eq_u8_masks64(SB)
+    MOVW R0, ret+32(FP)
+    RET
+
+// func eq_u8_masks16_raw() uintptr
+TEXT ·eq_u8_masks16_raw(SB), NOSPLIT, $0-40
+    MOVD src+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVD needle+16(FP), R2
+    MOVD out+24(FP), R3
+    CALL eq_u8_masks16(SB)
+    MOVW R0, ret+32(FP)
     RET
 
 // func noop_raw()
