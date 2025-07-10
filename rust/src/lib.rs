@@ -68,6 +68,7 @@ where
             return false;
         }
     }
+
     chunks.remainder().iter().all(|&b| b < 0x80)
 }
 
