@@ -59,10 +59,18 @@ func main() {
 				}
 				info := FuncInfo{Name: fd.Name.Name}
 				// params
+				paramIndex := 0
 				for _, p := range fd.Type.Params.List {
 					typeStr := exprToString(p.Type)
-					for range p.Names { // repeat for named params
-						info.Params = append(info.Params, typeStr)
+					if len(p.Names) == 0 {
+						name := fmt.Sprintf("arg%d", paramIndex)
+						info.Params = append(info.Params, name+":"+typeStr)
+						paramIndex++
+					} else {
+						for _, n := range p.Names {
+							info.Params = append(info.Params, n.Name+":"+typeStr)
+							paramIndex++
+						}
 					}
 				}
 				// results (assume 0 or 1)
@@ -106,11 +114,13 @@ func generateArch(arch string, funcs []FuncInfo) {
 
 	for _, fn := range funcs {
 		frame := 0
-		for _, p := range fn.Params {
-			frame += sizeOf(p)
+		for _, pair := range fn.Params {
+			_, typ := split(pair)
+			frame += sizeOf(typ)
 		}
 		if fn.Result != "" {
-			frame += sizeOf(fn.Result)
+			_, typ := split(fn.Result)
+			frame += sizeOf(typ)
 		}
 		// comment line
 		fmt.Fprintf(&b, "// func %s(", fn.Name)
@@ -124,13 +134,14 @@ func generateArch(arch string, funcs []FuncInfo) {
 		fmt.Fprintf(&b, "TEXT ·%s(SB), NOSPLIT, $0-%d\n", fn.Name, frame)
 		// move params
 		offset := 0
-		for i, p := range fn.Params {
-			sz := sizeOf(p)
+		for i, pair := range fn.Params {
+			name, typ := split(pair)
+			sz := sizeOf(typ)
 			reg := regOrder[i]
 			if arch == "amd64" {
-				b.WriteString(fmt.Sprintf("    MOVQ %s+%d(FP), %s\n", paramName(i), offset, reg))
+				b.WriteString(fmt.Sprintf("    MOVQ %s+%d(FP), %s\n", name, offset, reg))
 			} else { // arm64 uses MOVD
-				b.WriteString(fmt.Sprintf("    MOVD %s+%d(FP), %s\n", paramName(i), offset, reg))
+				b.WriteString(fmt.Sprintf("    MOVD %s+%d(FP), %s\n", name, offset, reg))
 			}
 			offset += sz
 		}
@@ -141,10 +152,11 @@ func generateArch(arch string, funcs []FuncInfo) {
 		if fn.Result != "" {
 			if arch == "amd64" {
 				inst := "MOVL"
+				destReg := "AX"
 				if fn.Result == "uint8" {
-					inst = "MOVB"
+					inst, destReg = "MOVB", "AL"
 				}
-				b.WriteString(fmt.Sprintf("    %s AX, ret+%d(FP)\n", inst, offset))
+				b.WriteString(fmt.Sprintf("    %s %s, ret+%d(FP)\n", inst, destReg, offset))
 			} else {
 				// arm64
 				inst := "MOVW"
@@ -157,26 +169,18 @@ func generateArch(arch string, funcs []FuncInfo) {
 		b.WriteString("    RET\n\n")
 	}
 
-	path := filepath.Join("internal", "ffi", fmt.Sprintf("syso_%s.s", arch))
+	path := fmt.Sprintf("syso_%s.s", arch)
 	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
 		log.Fatalf("write %s: %v", path, err)
 	}
 	fmt.Printf("generated %s with %d trampolines\n", path, len(funcs))
 }
 
-func paramName(i int) string {
-	switch i {
-	case 0:
-		return "ptr"
-	case 1:
-		return "n"
-	case 2:
-		return "lut"
-	case 3:
-		return "dst"
-	case 4:
-		return "src"
-	default:
-		return fmt.Sprintf("arg%d", i)
+func split(pair string) (name string, typ string) {
+	parts := strings.Split(pair, ":")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
 	}
+	// no name, only type
+	return "", pair
 }

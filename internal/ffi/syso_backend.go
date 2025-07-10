@@ -19,7 +19,7 @@
 //	cargo +$toolchain rustc --manifest-path ../../rust/Cargo.toml --release --lib --target $target -- -C relocation-model=pic; \
 //	cp ../../rust/target/$target/release/libsimba.a libsimba.syso"
 //
-//go:generate ./scripts/build_syso.sh
+//go:generate ../../scripts/build_syso.sh
 //go:generate go run ../../scripts/gen_trampolines
 package ffi
 
