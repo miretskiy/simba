@@ -3,11 +3,11 @@ package algo
 import "github.com/miretskiy/simba/pkg/intrinsics"
 
 // asciiThreshold is tuned specifically for IsASCII. Benchmarks show that the
-// scalar loop remains faster for slices below 64 bytes even though other
-// intrinsics cross over much earlier (~16 B). Keeping a dedicated constant
-// avoids penalising small strings while still exploiting SIMD on larger
-// inputs.
-const asciiThreshold = 64
+// SIMD kernel overtakes the scalar loop once the slice length reaches 32
+// bytes on Apple M-series CPUs and is expected to behave similarly on AWS
+// Graviton.  Using 32 B strikes a good balance between minimum latency for
+// tiny strings and maximum throughput on typical inputs.
+const asciiThreshold = 32
 
 // IsASCII is a high-level helper that chooses between a fast scalar loop for
 // tiny slices and the SIMD-accelerated intrinsic for larger inputs.

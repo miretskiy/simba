@@ -32,18 +32,17 @@ func TestIsASCII(t *testing.T) {
 // |   0  |   ~0.30      |    ~0.60       | SIMD 2× |
 // |   1  |   ~2.12      |    ~0.90       | Scalar  |
 // |  15  |   ~7.30      |    ~5.64       | Scalar  |
-// |  32  |   ~14.1      |   ~10.6        | Scalar  |
-// |  64  |   ~2.43      |   ~20.4        | SIMD 8× |
+// |  32  |   ~3.34      |   ~10.8        | SIMD 3× |
+// |  64  |   ~3.31      |   ~21.0        | SIMD 6× |
 // | 256  |   ~4.11      |   ~86          | SIMD 21×|
 // | 1 KiB|   ~9.44      |  ~326          | SIMD 34×|
 // | 4 KiB|   ~30.3      | ~1 260         | SIMD 42×|
 // | 64 KiB|  ~472       | ~20 000        | SIMD 42×|
 //
 // The lightweight assembly shim adds just **~0.3 ns** per call, yet the SIMD
-// implementation for IsASCII only starts winning at **64 B** because the
-// scalar loop is highly efficient on tiny inputs. Other intrinsics such as
-// SumU8 beat scalar much earlier, so higher-level packages may choose a lower
-// crossover, or expose algorithm-specific thresholds.
+// implementation for IsASCII starts winning at **32 B** and is decisively
+// faster from 64 B upward. Other intrinsics beat scalar even earlier.  The
+// algo layer now sets its cutoff at 32 B to reflect this measurement.
 
 // BenchmarkIsASCII measures the SIMD-backed implementation.
 func BenchmarkIsASCII(b *testing.B) {

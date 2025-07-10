@@ -57,6 +57,15 @@ This document captures the main decisions and explanations exchanged during the 
    * Conclusion: the single-tag SIMD kernel is not useful. Future speed-ups require batching multiple tags per call or fusing more logic into one kernel.
    * The experimental tag validator code (`pkg/algo/tag.go`, tests, benchmarks) will be deleted after checkpoint commit; history retains the prototype.
 
----
+## 2025-07-10 – Dual-lane SIMD refactor
+
+* **Rust crate** now exposes lane-specific symbols (`*_32`, `*_64`) implemented with a generic `LaneCount<N>` helper.
+* **Assembly stubs** duplicated for both `arm64` and `amd64`; legacy non-width stubs deleted.
+* **Go FFI backend** (`syso_backend.go`) converted to *thin* wrappers – one Go function per Rust symbol (e.g. `SumU8_32`). No length heuristics.
+* **Intrinsics layer** takes over width selection (≥64 B → 64-lane, else 32-lane). No scalar fallback.
+* **Algo layer** provides scalar fallback; thresholds updated: ASCII = 32 B, other helpers = 16 B.
+* Benchmarks (Apple M2 Max, syso FFI): SIMD overtakes scalar at 32 B for ASCII, at 16 B for `SumU8` / LUT ops.
+* README updated with the new dual-lane table and threshold policy.
+
 
 _This file is for informational purposes only and is not required for building the project._ 

@@ -73,6 +73,39 @@ They are auto-linked by the Go tool-chain on any platform.
 
 ---
 
+## 🆕 Dual-Lane SIMD Kernels (32- vs 64-byte)
+
+SIMBA now ships **two lane widths** for every byte-wise primitive:
+
+| Operation            | 32-lane symbol | 64-lane symbol |
+|----------------------|----------------|----------------|
+| Sum of bytes         | `sum_u8_32`    | `sum_u8_64`    |
+| ASCII check          | `is_ascii32`   | `is_ascii64`   |
+| Validate via LUT     | `validate_u8_lut32` | `validate_u8_lut64` |
+| Map via LUT          | `map_u8_lut32` | `map_u8_lut64` |
+
+The **intrinsics layer** (`pkg/intrinsics`) automatically picks the _widest_
+kernel that amortises its 0.3 ns FFI cost:
+
+```go
+// ≥64 B → 64-lane kernel, else 32-lane
+if len(b) >= 64 {
+    return ffi.SumU8_64(b)
+}
+return ffi.SumU8_32(b)
+```
+
+The **algo layer** adds a **scalar fallback** for tiny slices where pure Go
+still beats SIMD.  Current thresholds (Apple M-series):
+
+* Generic helpers (`SumU8`, LUT ops): **16 B**
+* ASCII check: **32 B**
+
+These cut-offs are recorded in `pkg/algo/threshold_*.go` and can be tuned per
+platform – early experiments on AWS Graviton look similar.
+
+---
+
 ## 🧩 Composing Intrinsics & Choosing Granularity
 
 Calling a single SIMD kernel is cheap once the data size amortises the fixed FFI cost (~2 ns via the syso trampoline). The moment you **chain** two kernels back-to-back you pay that gateway latency twice, which can wipe out the win for small/medium slices.
