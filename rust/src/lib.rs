@@ -1,7 +1,7 @@
 //! Rust SIMD kernels for Simba FFI layer
 #![feature(portable_simd)]
 #![allow(unsafe_op_in_unsafe_fn)] // calls to unsafe APIs are audited and wrapped inside unsafe fns
-use core::simd::prelude::SimdUint;
+use core::simd::prelude::{SimdPartialEq, SimdUint};
 use core::simd::{LaneCount, Simd, SupportedLaneCount};
 
 // === Portable SIMD byte-sum ===================================================
@@ -183,12 +183,101 @@ pub unsafe extern "C" fn map_u8_lut64(src: *const u8, len: usize, dst: *mut u8, 
 
 // legacy alias removed
 
+// === Byte equality mask =====================================================
+
+#[inline(always)]
+unsafe fn eq_u8_masks_impl<const LANES: usize>(
+    src: *const u8,
+    len: usize,
+    needle: u8,
+    out: *mut u128, // storage large enough for any mask size, cast later
+) -> usize
+where
+    LaneCount<LANES>: SupportedLaneCount,
+{
+    if len == 0 {
+        return 0;
+    }
+    let chunks = len / LANES;
+    let src_slice = core::slice::from_raw_parts(src, len);
+    let out_slice = core::slice::from_raw_parts_mut(out as *mut u128, chunks);
+
+    for (i, chunk) in src_slice.chunks_exact(LANES).enumerate() {
+        if i == chunks {
+            break;
+        }
+        let v = Simd::<u8, LANES>::from_slice(chunk);
+        let mask = v.simd_eq(Simd::splat(needle));
+        out_slice[i] = mask.to_bitmask() as u128;
+    }
+    chunks
+}
+
+macro_rules! export_eq_masks {
+    ($name:ident, $lanes:expr, $int:ty) => {
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(
+            src: *const u8,
+            len: usize,
+            needle: u8,
+            out: *mut $int,
+        ) -> usize {
+            if src.is_null() || out.is_null() || len == 0 {
+                return 0;
+            }
+            eq_u8_masks_impl::<$lanes>(src, len, needle, out as *mut u128)
+        }
+    };
+}
+
+export_eq_masks!(eq_u8_masks16, 16, u16);
+export_eq_masks!(eq_u8_masks32, 32, u32);
+export_eq_masks!(eq_u8_masks64, 64, u64);
+
 // -----------------------------------------------------------------------------
 
 // FFI helper: no-op function to measure call overhead -------------------------
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn noop() {
     // deliberately does nothing
+}
+
+// ─── 16-lane public exports ───────────────────────────────────────────────
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sum_u8_16(ptr: *const u8, len: usize) -> u32 {
+    if ptr.is_null() || len == 0 {
+        return 0;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    sum_u8_impl::<16>(data)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn is_ascii16(ptr: *const u8, len: usize) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    is_ascii_impl::<16>(data) as u8
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate_u8_lut16(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    let table = core::slice::from_raw_parts(lut, 256);
+    validate_u8_lut_impl::<16>(data, table) as u8
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn map_u8_lut16(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
+    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
+        return;
+    }
+    map_u8_lut_impl::<16>(src, len, dst, map);
 }
 
 #[cfg(test)]
@@ -247,6 +336,43 @@ mod tests {
             assert_eq!(super::is_ascii32(ascii.as_ptr(), ascii.len()), 1);
             assert_eq!(super::is_ascii64(non_ascii.as_ptr(), non_ascii.len()), 0);
             assert_eq!(super::is_ascii32(core::ptr::null(), 0), 1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use super::*;
+
+    fn scalar_mask(chunk: &[u8], needle: u8) -> u128 {
+        let mut m = 0u128;
+        for (i, &b) in chunk.iter().enumerate() {
+            if b == needle {
+                m |= 1 << i;
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn test_eq_u8_masks_basic() {
+        let data: Vec<u8> = (0..128u16).map(|i| (i % 256) as u8).collect();
+        let mut out16 = vec![0u16; data.len() / 16];
+        let mut out32 = vec![0u32; data.len() / 32];
+        let mut out64 = vec![0u64; data.len() / 64];
+        unsafe {
+            let c16 = super::eq_u8_masks16(data.as_ptr(), data.len(), 3u8, out16.as_mut_ptr());
+            let c32 = super::eq_u8_masks32(data.as_ptr(), data.len(), 3u8, out32.as_mut_ptr());
+            let c64 = super::eq_u8_masks64(data.as_ptr(), data.len(), 3u8, out64.as_mut_ptr());
+            assert_eq!(c16, out16.len());
+            assert_eq!(c32, out32.len());
+            assert_eq!(c64, out64.len());
+        }
+        // validate
+        for (i, &mask) in out16.iter().enumerate() {
+            let start = i * 16;
+            let chunk = &data[start..start + 16];
+            assert_eq!(mask as u128, scalar_mask(chunk, 3));
         }
     }
 }
