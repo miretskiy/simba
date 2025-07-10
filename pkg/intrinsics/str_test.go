@@ -25,28 +25,31 @@ func TestIsASCII(t *testing.T) {
 	}
 }
 
-// Benchmark insight (Apple M2 Max, Go 1.24, **syso trampoline – no CGO**, 10× 1 s)
+// Benchmark insight (Apple M2 Max, Go 1.24, **syso trampoline – no CGO**, `go test -bench=IsASCII -count=10`)
 //
-// | Size | SIMD (ns/op) | Scalar (ns/op) | Winner |
-// |------|--------------|----------------|--------|
-// |   0  |   ~0.30      |    ~0.60       | SIMD 2× |
-// |   1  |   ~2.12      |    ~0.90       | Scalar  |
-// |  15  |   ~7.30      |    ~5.64       | Scalar  |
-// |  32  |   ~3.34      |   ~10.8        | SIMD 3× |
-// |  64  |   ~3.31      |   ~21.0        | SIMD 6× |
-// | 256  |   ~4.11      |   ~86          | SIMD 21×|
-// | 1 KiB|   ~9.44      |  ~326          | SIMD 34×|
-// | 4 KiB|   ~30.3      | ~1 260         | SIMD 42×|
-// | 64 KiB|  ~472       | ~20 000        | SIMD 42×|
+// Representative results (Apple M2 Max, Go 1.24; median of 10 runs):
 //
-// The lightweight assembly shim adds just **~0.3 ns** per call, yet the SIMD
-// implementation for IsASCII starts winning at **32 B** and is decisively
-// faster from 64 B upward. Other intrinsics beat scalar even earlier.  The
-// algo layer now sets its cutoff at 32 B to reflect this measurement.
+// | Size (B) | SIMD (ns/op) | Scalar (ns/op) | Winner |
+// |----------|--------------|---------------|---------|
+// | 0        | ~1.95        | ~0.60         | Scalar  |
+// | 1        | ~3.30        | ~0.90         | Scalar  |
+// | 15       | ~8.30        | ~5.80         | Scalar  |
+// | 32       | ~3.34        | ~10.9         | SIMD 3× |
+// | 63       | ~15.0        | ~20.4         | SIMD 1.4×|
+// | 64       | ~3.32        | ~20.6         | SIMD 6× |
+// | 127      | ~27.7        | ~47.6         | SIMD 1.7×|
+// | 256      | ~5.46        | ~88.3         | SIMD 16×|
+// | 319      | ~29.0        | ~111          | SIMD 3.8×|
+// | 1 KiB    | ~10.2        | ~329          | SIMD 32×|
+// | 4 KiB    | ~31.0        | ~1 260        | SIMD 41×|
+// | 64 KiB   | ~469         | ~19 800       | SIMD 42×|
+//
+// The lightweight assembly shim adds just **~0.3 ns** per call. With 16/32/64-lane
+// dispatch SIMD wins from 32 B upward and dominates as input grows.
 
 // BenchmarkIsASCII measures the SIMD-backed implementation.
 func BenchmarkIsASCII(b *testing.B) {
-	sizes := []int{0, 1, 15, 32, 64, 256, 1024, 4096, 1 << 16} // 64 KiB upper bound
+	sizes := []int{0, 1, 15, 32, 63, 64, 127, 256, 319, 1024, 1023, 4095, 4096, 1 << 16} // add half-lane & off-alignment cases
 
 	for _, sz := range sizes {
 		// Prepare ASCII-only buffer. Using all-ASCII data forces the
