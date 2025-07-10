@@ -19,7 +19,7 @@
 //	cargo +$toolchain rustc --manifest-path ../../rust/Cargo.toml --release --lib --target $target -- -C relocation-model=pic; \
 //	cp ../../rust/target/$target/release/libsimba.a libsimba.syso"
 //
-//go:generate bash -c "set -euo pipefail; toolchain=nightly; for target in x86_64-apple-darwin aarch64-apple-darwin; do rustup target add $target --toolchain $toolchain >/dev/null 2>&1 || true; cargo +$toolchain rustc --manifest-path ../../rust/Cargo.toml --release --lib --target $target -- -C relocation-model=pic; if [ \"$target\" = \"x86_64-apple-darwin\" ]; then goarch=amd64; else goarch=arm64; fi; cp ../../rust/target/$target/release/libsimba.a libsimba_darwin_${goarch}.syso; done"
+//go:generate ./scripts/build_syso.sh
 package ffi
 
 // Width-specific thin wrappers around the raw assembly syscalls.  Higher-level
