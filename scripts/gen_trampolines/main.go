@@ -21,7 +21,7 @@ var typeSize = map[string]int{
 	"*byte":   8,
 	"uintptr": 8,
 	"uint32":  4,
-	"uint8":   8, // treat as uintptr size to maintain 8-byte alignment in FP frame
+	"uint8":   1,
 	"*uint16": 8,
 	"*uint32": 8,
 	"*uint64": 8,
@@ -118,10 +118,17 @@ func generateArch(arch string, funcs []FuncInfo) {
 	for _, fn := range funcs {
 		frame := 0
 		for _, pair := range fn.Params {
+			// align current offset to 8-byte boundary
+			if frame%8 != 0 {
+				frame += 8 - (frame % 8)
+			}
 			_, typ := split(pair)
 			frame += sizeOf(typ)
 		}
 		if fn.Result != "" {
+			if frame%8 != 0 {
+				frame += 8 - (frame % 8)
+			}
 			_, typ := split(fn.Result)
 			frame += sizeOf(typ)
 		}
@@ -139,6 +146,10 @@ func generateArch(arch string, funcs []FuncInfo) {
 		offset := 0
 		for i, pair := range fn.Params {
 			name, typ := split(pair)
+			// ensure offset is 8-byte aligned before reading argument
+			if offset%8 != 0 {
+				offset += 8 - (offset % 8)
+			}
 			sz := sizeOf(typ)
 			reg := regOrder[i]
 			if arch == "amd64" {

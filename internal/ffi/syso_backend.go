@@ -131,8 +131,16 @@ func MapBytes16(dst, src []byte, lut *[256]byte) {
 	map_u8_lut16_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
 }
 
-// EqU8Masks32 fills out with 32-lane equality masks. It returns the number of
-// mask words written (⩵ len(data)/32).
+// EqU8Masks32 compares each byte in `data` to `needle` using a 32-lane SIMD
+// kernel and stores one bitmask word per 32-byte chunk into `out`.  Each word
+// has bit *i* set when byte *i* in the chunk equals `needle`.
+//
+// Only **whole** 32-byte chunks are processed; any tail `len(data)%32` bytes are
+// ignored.  Callers must either pad the input, issue a second call with the
+// 16-lane variant, or handle the remainder scalarly.
+//
+// `out` must hold at least `len(data)/32` elements.  The function returns the
+// number of **bytes processed** (i.e. `len(data)/32 * 32`).
 func EqU8Masks32(data []byte, needle byte, out []uint32) int {
 	if len(data) == 0 {
 		return 0
@@ -140,10 +148,14 @@ func EqU8Masks32(data []byte, needle byte, out []uint32) int {
 	if len(out) < len(data)/32 {
 		panic("ffi: EqU8Masks32 out slice too short")
 	}
-	return int(eq_u8_masks32_raw(&data[0], uintptr(len(data)), needle, &out[0]))
+	chunks := len(data) / 32
+	eq_u8_masks32_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	return chunks * 32
 }
 
-// EqU8Masks64 variant using 64-lane kernel and u64 masks.
+// EqU8Masks64 is identical to EqU8Masks32 but operates on 64-byte chunks and
+// produces 64-bit masks.  Tail bytes `len(data)%64` are skipped. The return
+// value is the number of bytes processed.
 func EqU8Masks64(data []byte, needle byte, out []uint64) int {
 	if len(data) == 0 {
 		return 0
@@ -151,10 +163,14 @@ func EqU8Masks64(data []byte, needle byte, out []uint64) int {
 	if len(out) < len(data)/64 {
 		panic("ffi: EqU8Masks64 out slice too short")
 	}
-	return int(eq_u8_masks64_raw(&data[0], uintptr(len(data)), needle, &out[0]))
+	chunks := len(data) / 64
+	eq_u8_masks64_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	return chunks * 64
 }
 
-// EqU8Masks16 variant using 16-lane kernel and u16 masks.
+// EqU8Masks16 operates on 16-byte chunks producing 16-bit masks.  This helper
+// is convenient for processing short buffers or cleaning up a remainder after
+// a wider-lane call. Returns bytes processed.
 func EqU8Masks16(data []byte, needle byte, out []uint16) int {
 	if len(data) == 0 {
 		return 0
@@ -162,7 +178,9 @@ func EqU8Masks16(data []byte, needle byte, out []uint16) int {
 	if len(out) < len(data)/16 {
 		panic("ffi: EqU8Masks16 out slice too short")
 	}
-	return int(eq_u8_masks16_raw(&data[0], uintptr(len(data)), needle, &out[0]))
+	chunks := len(data) / 16
+	eq_u8_masks16_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	return chunks * 16
 }
 
 //go:noinline
