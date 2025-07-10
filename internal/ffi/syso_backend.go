@@ -20,6 +20,7 @@
 //	cp ../../rust/target/$target/release/libsimba.a libsimba.syso"
 //
 //go:generate ./scripts/build_syso.sh
+//go:generate go run ../../scripts/gen_trampolines
 package ffi
 
 // Width-specific thin wrappers around the raw assembly syscalls.  Higher-level
@@ -101,30 +102,51 @@ func Noop() {
 }
 
 // --- raw syscall signatures implemented in assembly ---
+//
+// Each Go prototype below is paired with a **trampoline** implemented in
+// architecture-specific assembly (`syso_*.s`).  To keep the two in sync we
+// tag every prototype with:
+//
+//   //simba:trampoline <arches>
+//
+// The `gen_trampolines` generator (invoked via `go:generate` above) scans the
+// package, finds these tags, and auto-writes the minimal `MOV / CALL / RET`
+// stubs for the listed architectures.  Adding a new FFI symbol now requires
+// only the Go prototype plus this comment—no hand-edited assembly.
+//
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func sum_u8_32_raw(ptr *byte, n uintptr) uint32
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func sum_u8_64_raw(ptr *byte, n uintptr) uint32
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func is_ascii32_raw(ptr *byte, n uintptr) uint8
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func is_ascii64_raw(ptr *byte, n uintptr) uint8
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func validate_u8_lut32_raw(ptr *byte, n uintptr, lut *byte) uint8
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func validate_u8_lut64_raw(ptr *byte, n uintptr, lut *byte) uint8
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func map_u8_lut32_raw(src *byte, n uintptr, dst *byte, lut *byte)
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func map_u8_lut64_raw(src *byte, n uintptr, dst *byte, lut *byte)
 
+//simba:trampoline amd64 arm64
 //go:noescape
 func noop_raw()
