@@ -2,17 +2,12 @@ package ffi
 
 import "testing"
 
-// pbench runs a parallel benchmark helper to measure function latency.
-func pbench(b *testing.B, f func()) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			f()
-		}
-	})
-}
-
-// BenchmarkNoop measures the overhead of calling the empty Rust function
-// through the active FFI backend (cgo).
+// BenchmarkNoop measures the per-call overhead of crossing the pure-Go FFI
+// trampoline (Go → tiny asm stub → Rust no-op).  It runs single-threaded on
+// the calling goroutine so the number reported is unaffected by scheduler
+// context switches.
 func BenchmarkNoop(b *testing.B) {
-	pbench(b, Noop)
+	for i := 0; i < b.N; i++ {
+		Noop()
+	}
 }

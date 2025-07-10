@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miretskiy/simba/internal/ffi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +44,7 @@ func scalarSum(data []byte) uint32 {
 }
 
 func BenchmarkSumU8(b *testing.B) {
+
 	sizes := []int{0, 64, 128, 256, 1024, 8192, 65536}
 	for _, n := range sizes {
 		// Generate input once per size.
@@ -66,10 +66,5 @@ func BenchmarkSumU8(b *testing.B) {
 			}
 		})
 
-		b.Run(fmt.Sprintf("FFI_%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				sink = ffi.SumU8(data)
-			}
-		})
 	}
 }

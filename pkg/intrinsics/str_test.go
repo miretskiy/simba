@@ -25,26 +25,29 @@ func TestIsASCII(t *testing.T) {
 	}
 }
 
-// Benchmark insight (Apple M2 Max, Go 1.24, 5× 1 s runs)
+// Benchmark insight (Apple M2 Max, Go 1.24, **syso trampoline – no CGO**, 10× 1 s)
 //
-// | Size | SIMD (ns/op) | Scalar (ns/op) | Speed-up |
-// |------|--------------|----------------|----------|
-// |   0  |   ~1.94      |    ~0.59       | 0.3×      |
-// |   1  |   ~31.6      |    ~0.89       | 0.03×     |
-// |  15  |   ~35.3      |    ~5.66       | 0.16×     |
-// |  64  |   ~32.2      |    ~20.2       | 0.63×     |
-// | 256  |   ~33.6      |    ~86.2       | 2.6×      |
-// | 1 KiB|   ~36.7      |    ~323        | 8.8×      |
-// | 4 KiB|   ~58.9      |   ~1 245       | 21×       |
-// | 64 KiB|  ~505       |  ~19 800       | 39×       |
+// | Size | SIMD (ns/op) | Scalar (ns/op) | Winner |
+// |------|--------------|----------------|--------|
+// |   0  |   ~0.30      |    ~0.60       | SIMD 2× |
+// |   1  |   ~2.12      |    ~0.90       | Scalar  |
+// |  15  |   ~7.30      |    ~5.64       | Scalar  |
+// |  32  |   ~14.1      |   ~10.6        | Scalar  |
+// |  64  |   ~2.43      |   ~20.4        | SIMD 8× |
+// | 256  |   ~4.11      |   ~86          | SIMD 21×|
+// | 1 KiB|   ~9.44      |  ~326          | SIMD 34×|
+// | 4 KiB|   ~30.3      | ~1 260         | SIMD 42×|
+// | 64 KiB|  ~472       | ~20 000        | SIMD 42×|
 //
-// The SIMD implementation has an ~30 ns fixed overhead (dominated by the
-// cgo boundary) that amortizes after roughly 100 B.  We therefore use 128 B as
-// the switch-over threshold in higher-level APIs.
+// The lightweight assembly shim adds just **~0.3 ns** per call, yet the SIMD
+// implementation for IsASCII only starts winning at **64 B** because the
+// scalar loop is highly efficient on tiny inputs. Other intrinsics such as
+// SumU8 beat scalar much earlier, so higher-level packages may choose a lower
+// crossover, or expose algorithm-specific thresholds.
 
 // BenchmarkIsASCII measures the SIMD-backed implementation.
 func BenchmarkIsASCII(b *testing.B) {
-	sizes := []int{0, 1, 15, 64, 256, 1024, 4096, 1 << 16} // 64 KiB upper bound
+	sizes := []int{0, 1, 15, 32, 64, 256, 1024, 4096, 1 << 16} // 64 KiB upper bound
 
 	for _, sz := range sizes {
 		// Prepare ASCII-only buffer. Using all-ASCII data forces the

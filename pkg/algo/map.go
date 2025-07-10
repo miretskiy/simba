@@ -20,8 +20,9 @@ func MakeByteSet(bytes ...byte) *ByteSet {
 	return &bs
 }
 
-// simdMapThreshold mirrors the crossover observed for AllBytesInSet.
-const simdMapThreshold = 64
+// simdMapThreshold mirrors the crossover observed for AllBytesInSet (~16 B
+// on Apple M2 Max with the no-cgo trampoline).
+const simdMapThreshold = 16
 
 // MapBytes maps bytes from src into dst via lut, like
 //

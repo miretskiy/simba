@@ -57,7 +57,7 @@ func MapBytes(dst, src []byte, lut *[256]byte) {
 	map_u8_lut_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
 }
 
-// Noop measures bare FFI overhead.
+//go:noinline
 func Noop() {
 	noop_raw()
 }
