@@ -2,182 +2,186 @@
 #![feature(portable_simd)]
 #![allow(unsafe_op_in_unsafe_fn)] // calls to unsafe APIs are audited and wrapped inside unsafe fns
 use core::simd::prelude::SimdUint;
-use core::simd::Simd;
+use core::simd::{LaneCount, Simd, SupportedLaneCount};
 
 // === Portable SIMD byte-sum ===================================================
 
-/// Returns the sum of all bytes in the buffer modulo 2^32.
-///
-/// The function accumulates into a 32-bit unsigned integer; if the arithmetic
-/// overflows, it wraps around just like normal `u32` addition.
-///
-/// Internally this wrapper loops over 64-byte blocks, calling the low-level
-/// `sum_u8_block` SIMD kernel for each block, and finishes the tail with a
-/// scalar loop.  A single call keeps the cgo overhead low (~80–120 ns on Apple
-/// Silicon) while each 64-byte kernel retires in roughly 2–3 ns – a 40×
-/// difference that makes it worthwhile to batch the work here rather than from
-/// the Go side.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sum_u8(ptr: *const u8, len: usize) -> u32 {
-    if ptr.is_null() || len == 0 {
-        return 0;
-    }
+// no module-level LANES constant; tests use explicit 64.
 
-    let data = core::slice::from_raw_parts(ptr, len);
-    sum_u8_impl(data)
-}
+// ---- Generic helpers --------------------------------------------------------
 
-/// Number of bytes processed per SIMD block.
-const LANES: usize = 64;
-
-/// Low-level kernel: sums exactly 64 bytes pointed to by `ptr`.
-///
-/// # Safety
-/// * `ptr` must be valid for **at least 64 readable bytes**.
-/// * The 64-byte region must be properly aligned for `u8` (any pointer on most
-///   ABIs) and may not overlap with mutable data for the duration of the call.
-///
-/// This function is marked `unsafe` so that higher-level safe wrappers must
-/// uphold these pre-conditions.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sum_u8_block(ptr: *const u8) -> u32 {
-    debug_assert!(!ptr.is_null());
-    let slice = core::slice::from_raw_parts(ptr, LANES);
-    let v = Simd::<u8, LANES>::from_slice(slice);
-    let v32: Simd<u32, LANES> = v.cast();
-    v32.reduce_sum()
-}
-
-fn sum_u8_impl(data: &[u8]) -> u32 {
+#[inline(always)]
+unsafe fn sum_u8_impl<const LANES_N: usize>(data: &[u8]) -> u32
+where
+    LaneCount<LANES_N>: SupportedLaneCount,
+{
     let mut total: u64 = 0;
 
-    let mut chunks = data.chunks_exact(LANES);
+    let mut chunks = data.chunks_exact(LANES_N);
     for chunk in &mut chunks {
-        // SAFETY: `chunk` is exactly 64 bytes long by construction.
-        total += unsafe { sum_u8_block(chunk.as_ptr()) } as u64;
+        let v = Simd::<u8, LANES_N>::from_slice(chunk);
+        let v32: Simd<u32, LANES_N> = v.cast();
+        total += v32.reduce_sum() as u64;
     }
-
     for &b in chunks.remainder() {
         total += b as u64;
     }
-
     (total & 0xFFFF_FFFF) as u32
+}
+
+/* ─── 32-lane and 64-lane public exports ─────────────────────────────────── */
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sum_u8_32(ptr: *const u8, len: usize) -> u32 {
+    if ptr.is_null() || len == 0 {
+        return 0;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    sum_u8_impl::<32>(data)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sum_u8_64(ptr: *const u8, len: usize) -> u32 {
+    if ptr.is_null() || len == 0 {
+        return 0;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    sum_u8_impl::<64>(data)
 }
 
 // -----------------------------------------------------------------------------
 
+#[inline(always)]
+unsafe fn is_ascii_impl<const N: usize>(data: &[u8]) -> bool
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    let mut chunks = data.chunks_exact(N);
+    for chunk in &mut chunks {
+        let v = Simd::<u8, N>::from_slice(chunk);
+        if v.reduce_max() >= 0x80 {
+            return false;
+        }
+    }
+    chunks.remainder().iter().all(|&b| b < 0x80)
+}
+
+/* ─── 32-lane symbol ───────────────────────────────────── */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn is_ascii(ptr: *const u8, len: usize) -> u8 {
+pub unsafe extern "C" fn is_ascii32(ptr: *const u8, len: usize) -> u8 {
     if ptr.is_null() || len == 0 {
-        return 1; // empty slice is ASCII
+        return 1;
     }
     let data = core::slice::from_raw_parts(ptr, len);
-    is_ascii_impl(data) as u8
+    is_ascii_impl::<32>(data) as u8
 }
 
-/// Low-level kernel: returns 1 if the 64-byte block is all ASCII, 0 otherwise.
+/* ─── 64-lane symbol ───────────────────────────────────── */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn is_ascii_block(ptr: *const u8) -> u8 {
-    debug_assert!(!ptr.is_null());
-    let slice = core::slice::from_raw_parts(ptr, LANES);
-    let v = Simd::<u8, LANES>::from_slice(slice);
-    let max_val: u8 = v.reduce_max();
-    (max_val < 0x80) as u8
+pub unsafe extern "C" fn is_ascii64(ptr: *const u8, len: usize) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    is_ascii_impl::<64>(data) as u8
 }
 
-fn is_ascii_impl(data: &[u8]) -> bool {
-    let mut chunks = data.chunks_exact(LANES);
+// legacy alias removed
+
+// === Generic byte-set validator ============================================
+
+#[inline(always)]
+unsafe fn validate_u8_lut_impl<const L: usize>(data: &[u8], table: &[u8]) -> bool
+where
+    LaneCount<L>: SupportedLaneCount,
+{
+    let mut chunks = data.chunks_exact(L);
     for chunk in &mut chunks {
-        // SAFETY: chunk is exactly 64 bytes.
-        if unsafe { is_ascii_block(chunk.as_ptr()) } == 0 {
+        let v = Simd::<u8, L>::from_slice(chunk);
+        let idx: Simd<usize, L> = v.cast();
+        let flags = Simd::<u8, L>::gather_or_default(table, idx);
+        if flags.reduce_min() == 0 {
             return false;
         }
     }
     for &b in chunks.remainder() {
-        if b & 0x80 != 0 {
+        if table[b as usize] == 0 {
             return false;
         }
     }
     true
 }
 
-// === Generic byte-set validator ============================================
-
-/// Returns 1 if **every** byte in the buffer indexes a non-zero entry in the
-/// 256-element lookup table `lut`.
-///
-/// `lut` is expected to be a 256-byte array where `lut[b] != 0` denotes that
-/// `b` belongs to the allowed set.  The table is treated as read-only; the
-/// function performs no bounds checks on the pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn validate_u8_lut(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
+pub unsafe extern "C" fn validate_u8_lut32(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
     if ptr.is_null() || len == 0 {
-        return 1; // empty slice trivially passes
+        return 1;
     }
-
-    debug_assert!(!lut.is_null());
-
     let data = core::slice::from_raw_parts(ptr, len);
     let table = core::slice::from_raw_parts(lut, 256);
-
-    let mut chunks = data.chunks_exact(LANES);
-    for chunk in &mut chunks {
-        // SAFETY: chunk is exactly LANES (64) bytes.
-        let v = Simd::<u8, LANES>::from_slice(chunk);
-        // Cast to usize indices for gather.
-        let idx: Simd<usize, LANES> = v.cast();
-        // Gather 64 flags from the table; values default to 0 if out of bounds
-        // (should never happen because idx < 256).
-        let flags = Simd::<u8, LANES>::gather_or_default(table, idx);
-        // If any flag is zero, at least one byte is invalid.
-        if flags.reduce_min() == 0 {
-            return 0;
-        }
-    }
-
-    // Tail processing.
-    for &b in chunks.remainder() {
-        if table[b as usize] == 0 {
-            return 0;
-        }
-    }
-
-    1
+    validate_u8_lut_impl::<32>(data, table) as u8
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate_u8_lut64(ptr: *const u8, len: usize, lut: *const u8) -> u8 {
+    if ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let data = core::slice::from_raw_parts(ptr, len);
+    let table = core::slice::from_raw_parts(lut, 256);
+    validate_u8_lut_impl::<64>(data, table) as u8
+}
+
+// legacy alias removed
 
 // === Byte mapping via LUT ====================================================
 
-/// Copies `len` bytes from `src` to `dst`, mapping each byte through the 256-
-/// element lookup table `map` (i.e. `dst[i] = map[src[i]]`).  The regions MAY
-/// overlap, allowing in-place transformation.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn map_u8_lut(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
-    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
-        return; // nothing to do or invalid pointers (debug mode will assert)
-    }
-
+#[inline(always)]
+unsafe fn map_u8_lut_impl<const L: usize>(
+    src: *const u8,
+    len: usize,
+    dst: *mut u8,
+    table: *const u8,
+) where
+    LaneCount<L>: SupportedLaneCount,
+{
     let src_slice = core::slice::from_raw_parts(src, len);
     let dst_slice = core::slice::from_raw_parts_mut(dst, len);
-    let table = core::slice::from_raw_parts(map, 256);
+    let map = core::slice::from_raw_parts(table, 256);
 
-    let mut chunks = src_slice.chunks_exact(LANES);
-    let mut out_chunks = dst_slice.chunks_exact_mut(LANES);
-
+    let mut chunks = src_slice.chunks_exact(L);
+    let mut out_chunks = dst_slice.chunks_exact_mut(L);
     for (chunk, out) in (&mut chunks).zip(&mut out_chunks) {
-        let v = Simd::<u8, LANES>::from_slice(chunk);
-        let idx: Simd<usize, LANES> = v.cast();
-        let mapped = Simd::<u8, LANES>::gather_or_default(table, idx);
-        // Write result to destination slice.
-        for i in 0..LANES {
+        let v = Simd::<u8, L>::from_slice(chunk);
+        let idx: Simd<usize, L> = v.cast();
+        let mapped = Simd::<u8, L>::gather_or_default(map, idx);
+        for i in 0..L {
             out[i] = mapped[i];
         }
     }
-
-    // Tail processing
+    // tail
     for (i, &b) in chunks.remainder().iter().enumerate() {
-        dst_slice[len - chunks.remainder().len() + i] = table[b as usize];
+        dst_slice[len - chunks.remainder().len() + i] = map[b as usize];
     }
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn map_u8_lut32(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
+    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
+        return;
+    }
+    map_u8_lut_impl::<32>(src, len, dst, map);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn map_u8_lut64(src: *const u8, len: usize, dst: *mut u8, map: *const u8) {
+    if len == 0 || src.is_null() || dst.is_null() || map.is_null() {
+        return;
+    }
+    map_u8_lut_impl::<64>(src, len, dst, map);
+}
+
+// legacy alias removed
 
 // -----------------------------------------------------------------------------
 
@@ -193,7 +197,7 @@ mod tests {
     fn test_sum_u8() {
         let data: Vec<u8> = (0u8..=255u8).collect();
         let expected: u32 = data.iter().map(|&b| b as u32).sum();
-        let result = unsafe { super::sum_u8(data.as_ptr(), data.len()) };
+        let result = unsafe { super::sum_u8_64(data.as_ptr(), data.len()) };
         assert_eq!(result, expected);
     }
 
@@ -204,22 +208,21 @@ mod tests {
         let data = vec![0xFFu8; LEN];
         // Expected result is (255 * LEN) mod 2^32.
         let expected = ((255u64 * LEN as u64) & 0xFFFF_FFFF) as u32;
-        let result = unsafe { super::sum_u8(data.as_ptr(), data.len()) };
+        let result = unsafe { super::sum_u8_64(data.as_ptr(), data.len()) };
         assert_eq!(result, expected);
     }
 
     #[test]
     fn test_sum_u8_various_lengths() {
         // Stress a variety of lengths to make sure chunk/remainder logic works.
-        const LANES: usize = super::LANES;
         let mut lengths = vec![
             0usize,
             1,
-            LANES - 1,
-            LANES,
-            LANES + 1,
-            2 * LANES - 3,
-            2 * LANES,
+            64 - 1,
+            64,
+            64 + 1,
+            2 * 64 - 3,
+            2 * 64,
             4096,
             10_000,
         ];
@@ -230,7 +233,7 @@ mod tests {
             let data: Vec<u8> = (0..len as u32).map(|i| (i % 256) as u8).collect();
 
             let expected: u32 = data.iter().map(|&b| b as u32).sum();
-            let got = unsafe { super::sum_u8(data.as_ptr(), data.len()) };
+            let got = unsafe { super::sum_u8_64(data.as_ptr(), data.len()) };
             assert_eq!(got, expected, "failed at len={}", len);
         }
     }
@@ -241,9 +244,9 @@ mod tests {
         let non_ascii = [0x48u8, 0x80u8, 0x49u8];
 
         unsafe {
-            assert_eq!(super::is_ascii(ascii.as_ptr(), ascii.len()), 1);
-            assert_eq!(super::is_ascii(non_ascii.as_ptr(), non_ascii.len()), 0);
-            assert_eq!(super::is_ascii(core::ptr::null(), 0), 1);
+            assert_eq!(super::is_ascii32(ascii.as_ptr(), ascii.len()), 1);
+            assert_eq!(super::is_ascii64(non_ascii.as_ptr(), non_ascii.len()), 0);
+            assert_eq!(super::is_ascii32(core::ptr::null(), 0), 1);
         }
     }
 }

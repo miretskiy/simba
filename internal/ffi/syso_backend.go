@@ -22,39 +22,77 @@
 //go:generate bash -c "set -euo pipefail; toolchain=nightly; for target in x86_64-apple-darwin aarch64-apple-darwin; do rustup target add $target --toolchain $toolchain >/dev/null 2>&1 || true; cargo +$toolchain rustc --manifest-path ../../rust/Cargo.toml --release --lib --target $target -- -C relocation-model=pic; if [ \"$target\" = \"x86_64-apple-darwin\" ]; then goarch=amd64; else goarch=arm64; fi; cp ../../rust/target/$target/release/libsimba.a libsimba_darwin_${goarch}.syso; done"
 package ffi
 
-// SumU8 returns the sum of all bytes in the slice.
-func SumU8(data []byte) uint32 {
+// Width-specific thin wrappers around the raw assembly syscalls.  Higher-level
+// packages decide which lane width to use based on slice length.
+
+// SumU8_32 adds all bytes using a 32-lane SIMD kernel.
+func SumU8_32(data []byte) uint32 {
 	if len(data) == 0 {
 		return 0
 	}
-	return sum_u8_raw(&data[0], uintptr(len(data)))
+	return sum_u8_32_raw(&data[0], uintptr(len(data)))
 }
 
-// IsASCII returns true if every byte in data < 0x80.
-func IsASCII(data []byte) bool {
+// SumU8_64 adds all bytes using a 64-lane SIMD kernel.
+func SumU8_64(data []byte) uint32 {
+	if len(data) == 0 {
+		return 0
+	}
+	return sum_u8_64_raw(&data[0], uintptr(len(data)))
+}
+
+// IsASCII32 returns 1 if every byte in data < 0x80 using the 32-lane kernel.
+func IsASCII32(data []byte) bool {
 	if len(data) == 0 {
 		return true
 	}
-	return is_ascii_raw(&data[0], uintptr(len(data))) != 0
+	return is_ascii32_raw(&data[0], uintptr(len(data))) != 0
 }
 
-// AllBytesInSet validates using a 256-byte LUT.
-func AllBytesInSet(data []byte, lut *[256]byte) bool {
+// IsASCII64 returns 1 if every byte in data < 0x80 using the 64-lane kernel.
+func IsASCII64(data []byte) bool {
 	if len(data) == 0 {
 		return true
 	}
-	return validate_u8_lut_raw(&data[0], uintptr(len(data)), &lut[0]) != 0
+	return is_ascii64_raw(&data[0], uintptr(len(data))) != 0
 }
 
-// MapBytes maps src through lut into dst.
-func MapBytes(dst, src []byte, lut *[256]byte) {
+// AllBytesInSet32 validates data via LUT using 32 lanes.
+func AllBytesInSet32(data []byte, lut *[256]byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	return validate_u8_lut32_raw(&data[0], uintptr(len(data)), &lut[0]) != 0
+}
+
+// AllBytesInSet64 validates data via LUT using 64 lanes.
+func AllBytesInSet64(data []byte, lut *[256]byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	return validate_u8_lut64_raw(&data[0], uintptr(len(data)), &lut[0]) != 0
+}
+
+// MapBytes32 maps src through lut into dst using 32-lane kernel.
+func MapBytes32(dst, src []byte, lut *[256]byte) {
 	if len(src) == 0 {
 		return
 	}
 	if len(dst) < len(src) {
 		panic("ffi: MapBytes dst slice too short")
 	}
-	map_u8_lut_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
+	map_u8_lut32_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
+}
+
+// MapBytes64 maps src through lut into dst using 64-lane kernel.
+func MapBytes64(dst, src []byte, lut *[256]byte) {
+	if len(src) == 0 {
+		return
+	}
+	if len(dst) < len(src) {
+		panic("ffi: MapBytes dst slice too short")
+	}
+	map_u8_lut64_raw(&src[0], uintptr(len(src)), &dst[0], &lut[0])
 }
 
 //go:noinline
@@ -65,16 +103,28 @@ func Noop() {
 // --- raw syscall signatures implemented in assembly ---
 
 //go:noescape
-func sum_u8_raw(ptr *byte, n uintptr) uint32
+func sum_u8_32_raw(ptr *byte, n uintptr) uint32
 
 //go:noescape
-func is_ascii_raw(ptr *byte, n uintptr) uint8
+func sum_u8_64_raw(ptr *byte, n uintptr) uint32
 
 //go:noescape
-func validate_u8_lut_raw(ptr *byte, n uintptr, lut *byte) uint8
+func is_ascii32_raw(ptr *byte, n uintptr) uint8
 
 //go:noescape
-func map_u8_lut_raw(src *byte, n uintptr, dst *byte, lut *byte)
+func is_ascii64_raw(ptr *byte, n uintptr) uint8
+
+//go:noescape
+func validate_u8_lut32_raw(ptr *byte, n uintptr, lut *byte) uint8
+
+//go:noescape
+func validate_u8_lut64_raw(ptr *byte, n uintptr, lut *byte) uint8
+
+//go:noescape
+func map_u8_lut32_raw(src *byte, n uintptr, dst *byte, lut *byte)
+
+//go:noescape
+func map_u8_lut64_raw(src *byte, n uintptr, dst *byte, lut *byte)
 
 //go:noescape
 func noop_raw()
