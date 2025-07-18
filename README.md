@@ -168,3 +168,21 @@ SIMBA’s goal is to **democratize low-level performance** for Go developers, wi
 ## 📜 License
 
 MIT or Apache 2.0, whichever you prefer.
+
+## ✅ Testing & CI
+
+SIMBA ships a **trampoline-sanity** unit-test that exercises the FFI layer with
+seven mixed-width arguments (pointer, usize, 8-/32-/64-bit ints, raw
+`float32`/`float64` bit-patterns).  On amd64 the last argument spills to the
+stack; on arm64 all fit in registers.  The Rust side recomputes a simple FNV
+hash and Go asserts equality, so any future stub width/offset error fails
+instantly in CI.
+
+Run just this guard:
+
+```bash
+go test ./internal/ffi -run TestTrampolineSanity
+```
+
+`go generate ./internal/ffi` regenerates the assembly stubs; the test must stay
+green on both amd64 and arm64.

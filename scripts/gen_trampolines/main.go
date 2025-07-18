@@ -22,14 +22,21 @@ var typeSize = map[string]int{
 	"uintptr": 8,
 	"uint32":  4,
 	"uint8":   1,
+	"uint64":  8,
+	"int64":   8,
+	"float64": 8,
 	"*uint16": 8,
 	"*uint32": 8,
 	"*uint64": 8,
+	"float32": 4,
 }
 
 func sizeOf(t string) int {
 	if sz, ok := typeSize[t]; ok {
 		return sz
+	}
+	if strings.HasPrefix(t, "*") {
+		return 8 // any pointer size
 	}
 	log.Fatalf("unsupported type in trampoline: %s", t)
 	return 0
@@ -118,19 +125,30 @@ func generateArch(arch string, funcs []FuncInfo) {
 	for _, fn := range funcs {
 		frame := 0
 		for _, pair := range fn.Params {
-			// align current offset to 8-byte boundary
-			if frame%8 != 0 {
-				frame += 8 - (frame % 8)
-			}
 			_, typ := split(pair)
-			frame += sizeOf(typ)
+			sz := sizeOf(typ)
+			align := sz
+			if align > 8 {
+				align = 8
+			}
+			if frame%align != 0 {
+				frame += align - (frame % align)
+			}
+			frame += sz
 		}
 		if fn.Result != "" {
-			if frame%8 != 0 {
-				frame += 8 - (frame % 8)
+			if fn.Result != "" {
+				_, typ := split(fn.Result)
+				sz := sizeOf(typ)
+				align := sz
+				if align > 8 {
+					align = 8
+				}
+				if frame%align != 0 {
+					frame += align - (frame % align)
+				}
+				frame += sz
 			}
-			_, typ := split(fn.Result)
-			frame += sizeOf(typ)
 		}
 		// comment line
 		fmt.Fprintf(&b, "// func %s(", fn.Name)
@@ -146,38 +164,158 @@ func generateArch(arch string, funcs []FuncInfo) {
 		offset := 0
 		for i, pair := range fn.Params {
 			name, typ := split(pair)
-			// ensure offset is 8-byte aligned before reading argument
-			if offset%8 != 0 {
-				offset += 8 - (offset % 8)
-			}
 			sz := sizeOf(typ)
-			reg := regOrder[i]
+
+			// ensure offset respects alignment of this type
+			align := sz
+			if align > 8 {
+				align = 8
+			}
+			if offset%align != 0 {
+				offset += align - (offset % align)
+			}
+
+			// Choose the outgoing register for this parameter. For AMD64 we
+			// have 6 integer argument registers (DI,SI,DX,CX,R8,R9); on arm64
+			// we get 8 (R0–R7).  If i exceeds that count we leave reg=="" and
+			// the value will be picked up later in the spill loop.
+			var reg string
+			if i < len(regOrder) {
+				reg = regOrder[i]
+			}
 			if arch == "amd64" {
-				b.WriteString(fmt.Sprintf("    MOVQ %s+%d(FP), %s\n", name, offset, reg))
-			} else { // arm64 uses MOVD
-				b.WriteString(fmt.Sprintf("    MOVD %s+%d(FP), %s\n", name, offset, reg))
+				// Select the *width-correct* move instruction for the type.
+				//  • uint32 / float32  → MOVL  (32-bit register write)
+				//  • uint8             → MOVB/LZX etc. (8-bit)
+				//  • everything else   → MOVQ  (64-bit)
+				var inst string
+				switch typ {
+				case "uint32", "float32":
+					inst = "MOVL"
+				case "uint8":
+					inst = "MOVBLZX" // move byte and zero extend to 64 bits
+				default:
+					inst = "MOVQ"
+				}
+				if reg != "" {
+					b.WriteString(fmt.Sprintf("    %s %s+%d(FP), %s\n", inst, name, offset, reg))
+				}
+			} else { // arm64 uses MOVD/MOVW for params
+				// arm64 equivalents: MOVD=64-bit, MOVW=32-bit, MOVBU=8-bit.
+				var inst string
+				switch typ {
+				case "uint32", "float32":
+					inst = "MOVW"
+				case "uint8":
+					inst = "MOVBU"
+				default:
+					inst = "MOVD"
+				}
+				if reg != "" {
+					b.WriteString(fmt.Sprintf("    %s %s+%d(FP), %s\n", inst, name, offset, reg))
+				}
 			}
 			offset += sz
 		}
-		// call
+		// call actual Rust symbol (without _raw suffix)
+		extra := 0
+		if len(fn.Params) > len(regOrder) {
+			extra = len(fn.Params) - len(regOrder)
+		}
+		// -------- Spill handling -------------------------------------------
+		// For parameters that did not fit in the register set we reserve a
+		// contiguous stack area (spillBytes = extra*8).  We copy each arg
+		// from the Go ABI frame into this scratch space before the CALL so
+		// that Rust can read it using the platform’s standard stack layout.
+		spillBytes := extra * 8
+		if spillBytes > 0 {
+			if arch == "amd64" {
+				b.WriteString(fmt.Sprintf("    SUBQ $%d, SP\n", spillBytes))
+			} else { // arm64 uses SUB SP, SP, #bytes
+				b.WriteString(fmt.Sprintf("    SUB $%d, SP\n", spillBytes))
+			}
+			for j := 0; j < extra; j++ {
+				paramIndex := len(regOrder) + j
+				name, typ := split(fn.Params[paramIndex])
+				off := paramOffset(fn.Params, paramIndex)
+				// Pick load/store width for the spilled argument.  We reuse
+				// the same MOV* mnemonics as above so both sides agree on
+				// width and sign-extension.
+				var instLoad, instStore string
+				if arch == "amd64" {
+					switch typ {
+					case "uint32", "float32":
+						instLoad, instStore = "MOVL", "MOVL"
+					case "uint8":
+						instLoad, instStore = "MOVB", "MOVB"
+					default:
+						instLoad, instStore = "MOVQ", "MOVQ"
+					}
+					b.WriteString(fmt.Sprintf("    %s %s+%d(FP), AX\n", instLoad, name, off))
+					if instStore == "MOVB" {
+						b.WriteString(fmt.Sprintf("    MOVB AL, %d(SP)\n", j*8))
+					} else {
+						b.WriteString(fmt.Sprintf("    %s AX, %d(SP)\n", instStore, j*8))
+					}
+				} else { // arm64
+					switch typ {
+					case "uint32", "float32":
+						instLoad, instStore = "MOVW", "MOVW"
+					case "uint8":
+						instLoad, instStore = "MOVBU", "MOVB"
+					default:
+						instLoad, instStore = "MOVD", "MOVD"
+					}
+					b.WriteString(fmt.Sprintf("    %s %s+%d(FP), R10\n", instLoad, name, off))
+					b.WriteString(fmt.Sprintf("    %s R10, %d(SP)\n", instStore, j*8))
+				}
+			}
+		}
 		rustName := strings.TrimSuffix(fn.Name, "_raw")
 		b.WriteString(fmt.Sprintf("    CALL %s(SB)\n", rustName))
-		// return move
+		if spillBytes > 0 {
+			if arch == "amd64" {
+				b.WriteString(fmt.Sprintf("    ADDQ $%d, SP\n", spillBytes))
+			} else {
+				b.WriteString(fmt.Sprintf("    ADD $%d, SP\n", spillBytes))
+			}
+		}
+
+		// compute start offset of return value area (after aligning to 8 bytes)
+		retOffset := offset
+		if retOffset%8 != 0 {
+			retOffset += 8 - (retOffset % 8)
+		}
+
+		// move return value from register to stack slot
 		if fn.Result != "" {
 			if arch == "amd64" {
-				inst := "MOVL"
-				destReg := "AX"
-				if fn.Result == "uint8" {
+				var inst, destReg string
+				switch fn.Result {
+				case "uint8":
 					inst, destReg = "MOVB", "AL"
+				case "uint32":
+					inst, destReg = "MOVL", "AX"
+				case "uintptr":
+					inst, destReg = "MOVQ", "AX"
+				default:
+					log.Fatalf("unsupported return type %s for amd64", fn.Result)
 				}
-				b.WriteString(fmt.Sprintf("    %s %s, ret+%d(FP)\n", inst, destReg, offset))
+				b.WriteString(fmt.Sprintf("    %s %s, ret+%d(FP)\n", inst, destReg, retOffset))
 			} else {
 				// arm64
-				inst := "MOVW"
-				if fn.Result == "uint8" {
+				var inst string
+				switch fn.Result {
+				case "uint8":
 					inst = "MOVBU"
+				case "uint32":
+					inst = "MOVW"
+				case "uintptr":
+					inst = "MOVD"
+				default:
+					log.Fatalf("unsupported return type %s for arm64", fn.Result)
 				}
-				b.WriteString(fmt.Sprintf("    %s R0, ret+%d(FP)\n", inst, offset))
+				b.WriteString(fmt.Sprintf("    %s R0, ret+%d(FP)\n", inst, retOffset))
 			}
 		}
 		b.WriteString("    RET\n\n")
@@ -188,6 +326,23 @@ func generateArch(arch string, funcs []FuncInfo) {
 		log.Fatalf("write %s: %v", path, err)
 	}
 	fmt.Printf("generated %s with %d trampolines\n", path, len(funcs))
+}
+
+func paramOffset(params []string, index int) int {
+	offset := 0
+	for i := 0; i < index; i++ {
+		_, typ := split(params[i])
+		sz := sizeOf(typ)
+		align := sz
+		if align > 8 {
+			align = 8
+		}
+		if offset%align != 0 {
+			offset += align - (offset % align)
+		}
+		offset += sz
+	}
+	return offset
 }
 
 func split(pair string) (name string, typ string) {

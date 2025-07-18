@@ -118,12 +118,12 @@ func TestEqU8Masks(t *testing.T) {
 	out32 := make([]uint32, 1) // 32/32 =1 mask word
 	out64 := make([]uint64, 1)
 
-	require.Equal(t, 1, EqU8Masks16(src16, '_', out16))
+	require.Equal(t, 16, EqU8Masks16(src16, '_', out16))
 	require.Equal(t, want16, out16[0])
 
-	require.Equal(t, 1, EqU8Masks32(src32, '_', out32))
+	require.Equal(t, 32, EqU8Masks32(src32, '_', out32))
 	require.Equal(t, want32, out32[0])
 
-	require.Equal(t, 1, EqU8Masks64(src64, '_', out64))
+	require.Equal(t, 64, EqU8Masks64(src64, '_', out64))
 	require.Equal(t, want64, out64[0])
 }

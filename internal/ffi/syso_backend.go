@@ -188,6 +188,41 @@ func Noop() {
 	noop_raw()
 }
 
+// Crc32Update32 updates CRC32 using the 32-lane SIMD kernel.
+func Crc32Update32(data []byte, init uint32) uint32 {
+	if len(data) == 0 {
+		return init
+	}
+	return crc32_update_32_raw(&data[0], uintptr(len(data)), init)
+}
+
+// Crc32Update64 updates CRC32 using the 64-lane SIMD kernel.
+func Crc32Update64(data []byte, init uint32) uint32 {
+	if len(data) == 0 {
+		return init
+	}
+	return crc32_update_64_raw(&data[0], uintptr(len(data)), init)
+}
+
+// Crc32Combine returns CRC32 of concatenation of two buffers given their CRCs
+// and the length of the second buffer.
+func Crc32Combine(crc1, crc2 uint32, len2 int) uint32 {
+	return crc32_combine_raw(crc1, crc2, uintptr(len2))
+}
+
+// Echo mirrors the rust Echo struct; used only in trampoline tests.
+type Echo struct {
+	Ptr     uintptr
+	Len     uintptr
+	V32     uint32
+	V8      uint8
+	_pad1   [3]byte // align
+	V64     uint64
+	F64Bits uint64
+	F32Bits uint32
+	_pad2   [4]byte
+}
+
 // --- raw syscall signatures implemented in assembly ---
 //
 // Each Go prototype below is paired with a **trampoline** implemented in
@@ -265,3 +300,36 @@ func eq_u8_masks16_raw(src *byte, n uintptr, needle uint8, out *uint16) uintptr
 //simba:trampoline amd64 arm64
 //go:noescape
 func noop_raw()
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func crc32_update_32_raw(ptr *byte, n uintptr, init uint32) uint32
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func crc32_update_64_raw(ptr *byte, n uintptr, init uint32) uint32
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func crc32_combine_raw(crc1 uint32, crc2 uint32, len2 uintptr) uint32
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func trampoline_sanity_raw(ptr *byte, n uintptr, val32 uint32, val8 uint8, val64 uint64, f64bits uint64, f32bits uint32) uintptr
+
+// TrampolineSanityHash returns a 64-bit mix of the four arguments. Used by
+// tests to verify that trampolines marshal arguments verbatim.
+func TrampolineSanityHash(ptr *byte, length uintptr, v32 uint32, v8 uint8, v64 uint64, f64bits uint64, f32bits uint32) uintptr {
+	return trampoline_sanity_raw(ptr, length, v32, v8, v64, f64bits, f32bits)
+}
+
+//simba:trampoline amd64 arm64
+//go:noescape
+func trampoline_echo_raw(ptr *byte, n uintptr, v32 uint32, v8 uint8, v64 uint64, f64bits uint64, f32bits uint32, out *Echo)
+
+// TrampolineEcho calls the echo helper for debugging.
+func TrampolineEcho(ptr *byte, length uintptr, v32 uint32, v8 uint8, v64 uint64, f64bits uint64, f32bits uint32) Echo {
+	var e Echo
+	trampoline_echo_raw(ptr, length, v32, v8, v64, f64bits, f32bits, &e)
+	return e
+}

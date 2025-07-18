@@ -3,6 +3,61 @@
 #![allow(unsafe_op_in_unsafe_fn)] // calls to unsafe APIs are audited and wrapped inside unsafe fns
 use core::simd::prelude::{SimdPartialEq, SimdUint};
 use core::simd::{LaneCount, Simd, SupportedLaneCount};
+use crc32c::{crc32c_append, crc32c_combine};
+
+// === CRC32C (Castagnoli) update & combine ====================================
+
+// Go's hash/crc32 package expects CRCs to be in *finalised* form—i.e. the
+// algorithm complements the accumulator before and after processing a buffer.
+// The `crc32c_append` function, on the other hand, operates on the *raw*
+// (un-finalised) value so that callers can chain updates cheaply.  Therefore we
+// need to mirror Go’s semantics by XOR-ing with 0xFFFF_FFFF around the call.
+fn crc32c_update(init_finalised: u32, data: &[u8]) -> u32 {
+    crc32c_append(init_finalised, data)
+}
+
+#[inline(always)]
+fn crc32c_combine_go(crc1_final: u32, crc2_final: u32, len2: usize) -> u32 {
+    // `crc32c_combine` operates directly on *finalised* CRC digests, matching Go’s
+    // semantics, so we can forward the values unmodified.
+    crc32c_combine(crc1_final, crc2_final, len2)
+}
+
+macro_rules! export_crc32_update {
+    ($name:ident) => {
+        #[doc = "Update CRC32C (Castagnoli) with additional bytes.\n\n\
+                # Safety\n\
+                `ptr` must be null or valid for `len` bytes."]
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $name(ptr: *const u8, len: usize, init: u32) -> u32 {
+            if ptr.is_null() || len == 0 {
+                return init;
+            }
+            let data = core::slice::from_raw_parts(ptr, len);
+            crc32c_update(init, data)
+        }
+    };
+}
+
+// Export symbols expected by Go trampolines (…_raw suffix)
+export_crc32_update!(crc32_update_32_raw);
+export_crc32_update!(crc32_update_64_raw);
+
+// Keep shorter aliases without `_raw` for potential direct calls (optional)
+export_crc32_update!(crc32_update_32);
+export_crc32_update!(crc32_update_64);
+
+/// Combine two finalised CRC32C digests (Castagnoli) as per Go's semantics.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn crc32_combine_raw(crc1: u32, crc2: u32, len2: usize) -> u32 {
+    crc32c_combine_go(crc1, crc2, len2)
+}
+
+// Optional alias without `_raw`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn crc32_combine(crc1: u32, crc2: u32, len2: usize) -> u32 {
+    crc32c_combine_go(crc1, crc2, len2)
+}
 
 // === Portable SIMD byte-sum ===================================================
 
@@ -259,6 +314,77 @@ pub unsafe extern "C" fn noop() {
     // deliberately does nothing
 }
 
+// === FFI trampoline sanity helper ===========================================
+/// Simple checksum over the arguments; used only by Go tests to verify that
+/// assembly trampolines pass parameters with the correct width/order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn trampoline_sanity(
+    ptr: *const u8,
+    len: usize,
+    val32: u32,
+    val8: u8,
+    val64: u64,
+    f64_bits: u64,
+    f32_bits: u32,
+) -> usize {
+    // Mix everything into a 64-bit value using a cheap LCG-style hash.
+    let mut h = 0xcbf29ce484222325u64; // FNV offset basis
+    #[inline(always)]
+    fn mix(h: u64, v: u64) -> u64 {
+        h ^ v.wrapping_mul(0x100_0000_01b3)
+    }
+    h = mix(h, ptr as u64);
+    h = mix(h, len as u64);
+    h = mix(h, val32 as u64);
+    h = mix(h, val8 as u64);
+    h = mix(h, val64);
+    let fb64 = f64_bits & 0x7fff_ffff_ffff_ffffu64; // ignore sign if provided
+    let fb32 = (f32_bits & 0x7fff_ffffu32) as u64;
+    h = mix(h, fb64);
+    h = mix(h, fb32);
+    h as usize
+}
+
+/// Echo structure for detailed trampoline debugging (test builds only).
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Echo {
+    pub ptr: usize,
+    pub len: usize,
+    pub v32: u32,
+    pub v8: u8,
+    pub v64: u64,
+    pub f64bits: u64,
+    pub f32bits: u32,
+}
+
+/// Bounce all parameters back to the caller; used by Go unit tests to pinpoint
+/// which argument (if any) is mis-marshalled by the assembly trampolines.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn trampoline_echo(
+    ptr: *const u8,
+    len: usize,
+    v32: u32,
+    v8: u8,
+    v64: u64,
+    f64bits: u64,
+    f32bits: u32,
+    out: *mut Echo,
+) {
+    if out.is_null() {
+        return;
+    }
+    *out = Echo {
+        ptr: ptr as usize,
+        len,
+        v32,
+        v8,
+        v64,
+        f64bits,
+        f32bits,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -384,6 +510,174 @@ mod mask_tests {
             let start = i * 16;
             let chunk = &data[start..start + 16];
             assert_eq!(mask as u128, scalar_mask(chunk, 3));
+        }
+    }
+}
+
+#[cfg(test)]
+mod crc32c_tests {
+    /// Known-good CRC32C values computed via Go's hash/crc32 package.
+    const CRC1: u32 = 0xa016d052; // checksum of a single byte 0x01
+    const CRC_HELLO: u32 = 0x9a71bb4c; // checksum of "hello"
+
+    #[test]
+    fn test_crc32c_single_byte() {
+        let data = [0x01u8];
+        let got = super::crc32c_update(0, &data);
+        assert_eq!(
+            got, CRC1,
+            "crc32c_update mismatch for 0x01: {:08x} != {:08x}",
+            got, CRC1
+        );
+    }
+
+    #[test]
+    fn test_crc32c_hello() {
+        let data = b"hello";
+        let got = super::crc32c_update(0, data);
+        assert_eq!(
+            got, CRC_HELLO,
+            "crc32c_update mismatch for \"hello\": {:08x} != {:08x}",
+            got, CRC_HELLO
+        );
+    }
+
+    #[test]
+    fn test_crc32c_reference_crc_crate() {
+        const CRC32C: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
+        let data1 = [0x01u8];
+        let data2 = b"hello";
+        let ref1 = CRC32C.checksum(&data1);
+        let ref2 = CRC32C.checksum(data2);
+        assert_eq!(ref1, CRC1);
+        assert_eq!(ref2, CRC_HELLO);
+    }
+
+    #[test]
+    fn test_crc32c_direct_function() {
+        let data1 = [0x01u8];
+        let data2 = b"hello";
+        assert_eq!(crc32c::crc32c(&data1), 0xa016d052);
+        assert_eq!(crc32c::crc32c(data2), 0x9a71bb4c);
+    }
+
+    #[test]
+    fn test_crc32c_append_semantics() {
+        let data = [0x01u8];
+        let res = crc32c::crc32c_append(0, &data);
+        assert_eq!(
+            res, 0xa016d052,
+            "crc32c_append with init 0 should give finalised CRC"
+        );
+    }
+
+    #[test]
+    fn test_crc32c_50_ab() {
+        let data = vec![0xABu8; 50];
+        let expect = 0xd64d26c9u32;
+        let got = super::crc32c_update(0, &data);
+        assert_eq!(got, expect);
+    }
+
+    #[test]
+    fn test_crc32c_ffi_raw() {
+        let data = [0x01u8];
+        let got = unsafe { super::crc32_update_32_raw(data.as_ptr(), data.len(), 0) };
+        assert_eq!(got, 0xa016d052);
+    }
+
+    #[test]
+    fn test_crc32c_alias_function() {
+        let data = [0x01u8];
+        let got = unsafe { super::crc32_update_32(data.as_ptr(), data.len(), 0) };
+        assert_eq!(got, 0xa016d052);
+    }
+
+    #[test]
+    fn test_crc32c_combine() {
+        use rand::{RngCore, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let len1 = 100usize;
+        let len2 = 200usize;
+        let mut buf1 = vec![0u8; len1];
+        let mut buf2 = vec![0u8; len2];
+        rng.fill_bytes(&mut buf1);
+        rng.fill_bytes(&mut buf2);
+
+        let crc1 = super::crc32c_update(0, &buf1);
+        let crc2 = super::crc32c_update(0, &buf2);
+        let mut concat = Vec::from(buf1);
+        concat.extend_from_slice(&buf2);
+        let expected_concat = super::crc32c_update(0, &concat);
+        let combined = unsafe { super::crc32_combine_raw(crc1, crc2, len2) };
+        assert_eq!(combined, expected_concat, "combine mismatch");
+    }
+
+    #[test]
+    fn debug_combine_variants() {
+        use crc32c::crc32c_combine;
+        let buf1: &[u8] = b"hello";
+        let buf2: &[u8] = b" world"; // len2=6
+        let crc1 = super::crc32c_update(0, buf1);
+        let crc2 = super::crc32c_update(0, buf2);
+        let mut concat = Vec::from(buf1);
+        concat.extend_from_slice(&buf2);
+        let expected = super::crc32c_update(0, &concat);
+
+        let raw1 = !crc1;
+        let raw2 = !crc2;
+
+        let v1 = !crc32c_combine(raw1, raw2, buf2.len());
+        let v2 = crc32c_combine(raw1, raw2, buf2.len());
+        let v3 = !crc32c_combine(crc1, crc2, buf2.len());
+        let v4 = crc32c_combine(crc1, crc2, buf2.len());
+        println!(
+            "expected {:08x} v1 {:08x} v2 {:08x} v3 {:08x} v4 {:08x}",
+            expected, v1, v2, v3, v4
+        );
+    }
+
+    #[test]
+    fn test_crc32c_combine_variants_randomised() {
+        use rand::{RngCore, SeedableRng};
+
+        const TRIALS: usize = 100;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0x5eed);
+
+        for _ in 0..TRIALS {
+            // Generate two random buffers of random length up to 8 KiB.
+            let len1 = (rng.next_u32() % 8192) as usize;
+            let len2 = (rng.next_u32() % 8192) as usize;
+            let mut buf1 = vec![0u8; len1];
+            let mut buf2 = vec![0u8; len2];
+            rng.fill_bytes(&mut buf1);
+            rng.fill_bytes(&mut buf2);
+
+            let crc1 = super::crc32c_update(0, &buf1);
+            let crc2 = super::crc32c_update(0, &buf2);
+
+            // Ground-truth CRC of the concatenation.
+            let mut concat = buf1.clone();
+            concat.extend_from_slice(&buf2);
+            let expected = super::crc32c_update(0, &concat);
+
+            // Variant implemented in Simba (direct finalised combine).
+            let chosen = super::crc32c_combine_go(crc1, crc2, len2);
+            assert_eq!(chosen, expected, "crc32c_combine_go produced wrong value");
+
+            // Sanity-check other flip combinations — none should match.
+            let raw1 = !crc1;
+            let raw2 = !crc2;
+            let variants = [
+                // Previously-used implementation that flipped before + after
+                !crc32c::crc32c_combine(raw1, raw2, len2),
+                // Mix-and-match variants
+                crc32c::crc32c_combine(raw1, raw2, len2),
+                !crc32c::crc32c_combine(crc1, crc2, len2),
+            ];
+            for (i, &v) in variants.iter().enumerate() {
+                assert_ne!(v, expected, "variant {} unexpectedly matched", i + 1);
+            }
         }
     }
 }

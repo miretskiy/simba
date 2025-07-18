@@ -67,5 +67,19 @@ This document captures the main decisions and explanations exchanged during the 
 * Benchmarks (Apple M2 Max, syso FFI): SIMD overtakes scalar at 32 B for ASCII, at 16 B for `SumU8` / LUT ops.
 * README updated with the new dual-lane table and threshold policy.
 
+### 2025-07-18 – Trampoline sanity guard
+
+* Added `trampoline_sanity` echo function in Rust plus Go unit-test that mixes
+  seven arguments and compares hashes; fails on any mis-marshalled byte.
+* Generator now spills surplus args to the stack (amd64) and documents MOV
+  width selection and spill logic via inline comments.
+* README updated with Testing section describing how to run the guard.
+
 
 _This file is for informational purposes only and is not required for building the project._ 
+
+## Contributor Preferences
+
+- When running Go benchmarks interactively, pipe results through `tee` (e.g. `go test -bench ... | tee /tmp/bench.txt`) so that raw output is stored for later analysis while still visible in the console.
+- All submitted code must compile without warnings and pass `go vet`, `golint`, and `cargo clippy` (where applicable).  Temporary debug prints and unused identifiers should be removed before committing.
+- Follow established language and project best-practices: idiomatic naming, proper error handling, and minimal allocation. 

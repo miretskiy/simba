@@ -110,34 +110,94 @@ TEXT ·map_u8_lut16_raw(SB), NOSPLIT, $0-32
 TEXT ·eq_u8_masks32_raw(SB), NOSPLIT, $0-40
     MOVQ src+0(FP), DI
     MOVQ n+8(FP), SI
-    MOVQ needle+16(FP), DX
+    MOVBLZX needle+16(FP), DX
     MOVQ out+24(FP), CX
     CALL eq_u8_masks32(SB)
-    MOVL AX, ret+32(FP)
+    MOVQ AX, ret+32(FP)
     RET
 
 // func eq_u8_masks64_raw() uintptr
 TEXT ·eq_u8_masks64_raw(SB), NOSPLIT, $0-40
     MOVQ src+0(FP), DI
     MOVQ n+8(FP), SI
-    MOVQ needle+16(FP), DX
+    MOVBLZX needle+16(FP), DX
     MOVQ out+24(FP), CX
     CALL eq_u8_masks64(SB)
-    MOVL AX, ret+32(FP)
+    MOVQ AX, ret+32(FP)
     RET
 
 // func eq_u8_masks16_raw() uintptr
 TEXT ·eq_u8_masks16_raw(SB), NOSPLIT, $0-40
     MOVQ src+0(FP), DI
     MOVQ n+8(FP), SI
-    MOVQ needle+16(FP), DX
+    MOVBLZX needle+16(FP), DX
     MOVQ out+24(FP), CX
     CALL eq_u8_masks16(SB)
-    MOVL AX, ret+32(FP)
+    MOVQ AX, ret+32(FP)
     RET
 
 // func noop_raw()
 TEXT ·noop_raw(SB), NOSPLIT, $0-0
     CALL noop(SB)
+    RET
+
+// func crc32_update_32_raw() uint32
+TEXT ·crc32_update_32_raw(SB), NOSPLIT, $0-24
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVL init+16(FP), DX
+    CALL crc32_update_32(SB)
+    MOVL AX, ret+24(FP)
+    RET
+
+// func crc32_update_64_raw() uint32
+TEXT ·crc32_update_64_raw(SB), NOSPLIT, $0-24
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVL init+16(FP), DX
+    CALL crc32_update_64(SB)
+    MOVL AX, ret+24(FP)
+    RET
+
+// func crc32_combine_raw() uint32
+TEXT ·crc32_combine_raw(SB), NOSPLIT, $0-20
+    MOVL crc1+0(FP), DI
+    MOVL crc2+4(FP), SI
+    MOVQ len2+8(FP), DX
+    CALL crc32_combine(SB)
+    MOVL AX, ret+16(FP)
+    RET
+
+// func trampoline_sanity_raw() uintptr
+TEXT ·trampoline_sanity_raw(SB), NOSPLIT, $0-56
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVL val32+16(FP), DX
+    MOVBLZX val8+20(FP), CX
+    MOVQ val64+24(FP), R8
+    MOVQ f64bits+32(FP), R9
+    SUBQ $8, SP
+    MOVL f32bits+40(FP), AX
+    MOVL AX, 0(SP)
+    CALL trampoline_sanity(SB)
+    ADDQ $8, SP
+    MOVQ AX, ret+48(FP)
+    RET
+
+// func trampoline_echo_raw()
+TEXT ·trampoline_echo_raw(SB), NOSPLIT, $0-56
+    MOVQ ptr+0(FP), DI
+    MOVQ n+8(FP), SI
+    MOVL v32+16(FP), DX
+    MOVBLZX v8+20(FP), CX
+    MOVQ v64+24(FP), R8
+    MOVQ f64bits+32(FP), R9
+    SUBQ $16, SP
+    MOVL f32bits+40(FP), AX
+    MOVL AX, 0(SP)
+    MOVQ out+44(FP), AX
+    MOVQ AX, 8(SP)
+    CALL trampoline_echo(SB)
+    ADDQ $16, SP
     RET
 

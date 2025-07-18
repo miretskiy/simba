@@ -110,34 +110,87 @@ TEXT ·map_u8_lut16_raw(SB), NOSPLIT, $0-32
 TEXT ·eq_u8_masks32_raw(SB), NOSPLIT, $0-40
     MOVD src+0(FP), R0
     MOVD n+8(FP), R1
-    MOVD needle+16(FP), R2
+    MOVBU needle+16(FP), R2
     MOVD out+24(FP), R3
     CALL eq_u8_masks32(SB)
-    MOVW R0, ret+32(FP)
+    MOVD R0, ret+32(FP)
     RET
 
 // func eq_u8_masks64_raw() uintptr
 TEXT ·eq_u8_masks64_raw(SB), NOSPLIT, $0-40
     MOVD src+0(FP), R0
     MOVD n+8(FP), R1
-    MOVD needle+16(FP), R2
+    MOVBU needle+16(FP), R2
     MOVD out+24(FP), R3
     CALL eq_u8_masks64(SB)
-    MOVW R0, ret+32(FP)
+    MOVD R0, ret+32(FP)
     RET
 
 // func eq_u8_masks16_raw() uintptr
 TEXT ·eq_u8_masks16_raw(SB), NOSPLIT, $0-40
     MOVD src+0(FP), R0
     MOVD n+8(FP), R1
-    MOVD needle+16(FP), R2
+    MOVBU needle+16(FP), R2
     MOVD out+24(FP), R3
     CALL eq_u8_masks16(SB)
-    MOVW R0, ret+32(FP)
+    MOVD R0, ret+32(FP)
     RET
 
 // func noop_raw()
 TEXT ·noop_raw(SB), NOSPLIT, $0-0
     CALL noop(SB)
+    RET
+
+// func crc32_update_32_raw() uint32
+TEXT ·crc32_update_32_raw(SB), NOSPLIT, $0-24
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVW init+16(FP), R2
+    CALL crc32_update_32(SB)
+    MOVW R0, ret+24(FP)
+    RET
+
+// func crc32_update_64_raw() uint32
+TEXT ·crc32_update_64_raw(SB), NOSPLIT, $0-24
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVW init+16(FP), R2
+    CALL crc32_update_64(SB)
+    MOVW R0, ret+24(FP)
+    RET
+
+// func crc32_combine_raw() uint32
+TEXT ·crc32_combine_raw(SB), NOSPLIT, $0-20
+    MOVW crc1+0(FP), R0
+    MOVW crc2+4(FP), R1
+    MOVD len2+8(FP), R2
+    CALL crc32_combine(SB)
+    MOVW R0, ret+16(FP)
+    RET
+
+// func trampoline_sanity_raw() uintptr
+TEXT ·trampoline_sanity_raw(SB), NOSPLIT, $0-56
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVW val32+16(FP), R2
+    MOVBU val8+20(FP), R3
+    MOVD val64+24(FP), R4
+    MOVD f64bits+32(FP), R5
+    MOVW f32bits+40(FP), R6
+    CALL trampoline_sanity(SB)
+    MOVD R0, ret+48(FP)
+    RET
+
+// func trampoline_echo_raw()
+TEXT ·trampoline_echo_raw(SB), NOSPLIT, $0-56
+    MOVD ptr+0(FP), R0
+    MOVD n+8(FP), R1
+    MOVW v32+16(FP), R2
+    MOVBU v8+20(FP), R3
+    MOVD v64+24(FP), R4
+    MOVD f64bits+32(FP), R5
+    MOVW f32bits+40(FP), R6
+    MOVD out+48(FP), R7
+    CALL trampoline_echo(SB)
     RET
 
