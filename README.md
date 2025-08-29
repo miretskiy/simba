@@ -165,9 +165,12 @@ SIMBA’s goal is to **democratize low-level performance** for Go developers, wi
 
 ---
 
+
 ## 📜 License
 
-MIT or Apache 2.0, whichever you prefer.
+This project is licensed under the [Apache License, Version 2.0](LICENSE).  
+You may obtain a copy of the license at [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0).
+
 
 ## ✅ Testing & CI
 
