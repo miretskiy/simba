@@ -1,11 +1,8 @@
 module github.com/miretskiy/simba
 
-go 1.24.4
+go 1.25.0
 
-require (
-	github.com/DataDog/dd-go v0.0.0
-	github.com/stretchr/testify v1.10.0
-)
+require github.com/stretchr/testify v1.10.0
 
 replace github.com/DataDog/dd-go => ../dd-go
 

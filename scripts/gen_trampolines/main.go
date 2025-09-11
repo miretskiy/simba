@@ -296,6 +296,8 @@ func generateArch(arch string, funcs []FuncInfo) {
 					inst, destReg = "MOVB", "AL"
 				case "uint32":
 					inst, destReg = "MOVL", "AX"
+				case "uint64":
+					inst, destReg = "MOVQ", "AX"
 				case "uintptr":
 					inst, destReg = "MOVQ", "AX"
 				default:
@@ -310,6 +312,8 @@ func generateArch(arch string, funcs []FuncInfo) {
 					inst = "MOVBU"
 				case "uint32":
 					inst = "MOVW"
+				case "uint64":
+					inst = "MOVD"
 				case "uintptr":
 					inst = "MOVD"
 				default:
