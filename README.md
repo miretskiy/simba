@@ -28,6 +28,61 @@ convention – no cgo, no dynamic loader, ~2 ns overhead.
 [ Go Code ] --asm shim--> [ .syso object ] --> [ Rust SIMD ]
 ```
 
+## ⚠️ **CRITICAL: Stack Frame Constraints**
+
+**SIMBA trampolines have fundamental stack usage limitations** that determine which Rust functions can be safely called:
+
+### 🟢 **SAFE Functions (Work with SIMBA):**
+- **Simple SIMD operations** (sum_u8, crc32, is_ascii, etc.)
+- **Predictable small stack usage** (<2KB total)
+- **Direct computations** without deep library calls
+- **Leaf-like functions** with minimal call depth
+
+### 🔴 **UNSAFE Functions (Will Crash):**
+- **Complex library operations** (CSV parsing, JSON, file I/O)
+- **Deep recursive calls** or nested function chains  
+- **Large local buffers** or complex data structures
+- **Standard library I/O** with unpredictable stack usage
+
+### 🧪 **Root Cause:**
+Go's [`NOSPLIT` constraint](https://go.dev/src/runtime/stack.go) limits stack growth to ~2KB for functions that can't trigger stack growth. SIMBA trampolines use `$0` frame size, assuming minimal stack usage. Functions that exceed this limit cause **segmentation faults**.
+
+**Technical Background:**
+- [Go Assembly Manual](https://go.dev/doc/asm) - NOSPLIT directive documentation
+- [Stack Management in Go](https://go.dev/src/runtime/stack.go) - Runtime stack constraints
+- [rustgo Project Analysis](https://github.com/dmj111/rustgo) - Similar FFI approach and limitations
+
+### 🔍 **Validation Tools:**
+```bash
+# Analyze Rust function stack usage at compile time
+RUSTFLAGS="-Z emit-stack-sizes" cargo build --release --target x86_64-unknown-linux-gnu
+objdump -s -j .stack_sizes target/x86_64-unknown-linux-gnu/release/libmycrate.a
+
+# Alternative: Use cargo-call-stack (embedded-focused)
+cargo install cargo-call-stack
+cargo call-stack --bin mybin
+```
+
+**Tool References:**
+- [emit-stack-sizes documentation](https://doc.rust-lang.org/nightly/unstable-book/compiler-flags/emit-stack-sizes.html) - Rust compiler flag for stack analysis
+- [cargo-call-stack](https://github.com/japaric/cargo-call-stack) - Call graph and stack usage analysis tool
+- [Stack Size Analysis Guide](https://users.rust-lang.org/t/figuring-out-stack-sizes-for-functions-and-values/56335) - Community discussion on measuring stack usage
+
+### ✅ **Best Practices:**
+1. **Keep SIMBA functions simple** - direct computations only
+2. **Use CGO for complex operations** - file I/O, parsing, etc.
+3. **Test thoroughly** before deploying SIMBA trampolines
+4. **Measure stack usage** during development with tools above
+5. **When in doubt, use CGO** - it's safer for complex operations
+
+**Remember:** SIMBA excels at simple, predictable SIMD kernels. For complex library operations, stick with CGO.
+
+### 📚 **Additional Reading:**
+- [A Guide to Go Assembly](https://github.com/teh-cmc/go-internals/tree/master/chapter1_assembly_primer) - Deep dive into Go assembly internals
+- [Go Internal ABI Documentation](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md) - Go's internal calling convention
+- [System V ABI](https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf) - x86-64 calling convention used by Rust
+- [AAPCS64 Specification](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst) - ARM64 calling convention
+
 ---
 
 ## 📦 Getting Started

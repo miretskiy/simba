@@ -9,4 +9,5 @@ edition = "2024"
 name = "simba"
 crate-type = ["staticlib", "cdylib"]
 
-[dependencies] 
+[dependencies]
+crc32c = "0.6" 

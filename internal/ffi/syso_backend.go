@@ -154,7 +154,7 @@ func EqU8Masks32(data []byte, needle byte, out []uint32) int {
 		panic("ffi: EqU8Masks32 out slice too short")
 	}
 	chunks := len(data) / 32
-	eq_u8_masks32_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	eq_u8_masks32_raw(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), needle, uintptr(unsafe.Pointer(&out[0])))
 	runtime.KeepAlive(data)
 	runtime.KeepAlive(out)
 	return chunks * 32
@@ -171,7 +171,7 @@ func EqU8Masks64(data []byte, needle byte, out []uint64) int {
 		panic("ffi: EqU8Masks64 out slice too short")
 	}
 	chunks := len(data) / 64
-	eq_u8_masks64_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	eq_u8_masks64_raw(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), needle, uintptr(unsafe.Pointer(&out[0])))
 	runtime.KeepAlive(data)
 	runtime.KeepAlive(out)
 	return chunks * 64
@@ -188,7 +188,7 @@ func EqU8Masks16(data []byte, needle byte, out []uint16) int {
 		panic("ffi: EqU8Masks16 out slice too short")
 	}
 	chunks := len(data) / 16
-	eq_u8_masks16_raw(&data[0], uintptr(len(data)), needle, &out[0])
+	eq_u8_masks16_raw(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), needle, uintptr(unsafe.Pointer(&out[0])))
 	runtime.KeepAlive(data)
 	runtime.KeepAlive(out)
 	return chunks * 16
@@ -204,7 +204,7 @@ func Crc32Update32(data []byte, init uint32) uint32 {
 	if len(data) == 0 {
 		return init
 	}
-	result := crc32_update_32_raw(&data[0], uintptr(len(data)), init)
+	result := crc32_update_32_raw(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), init)
 	runtime.KeepAlive(data)
 	return result
 }
@@ -214,7 +214,7 @@ func Crc32Update64(data []byte, init uint32) uint32 {
 	if len(data) == 0 {
 		return init
 	}
-	result := crc32_update_64_raw(&data[0], uintptr(len(data)), init)
+	result := crc32_update_64_raw(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), init)
 	runtime.KeepAlive(data)
 	return result
 }
@@ -368,7 +368,7 @@ func trampoline_sanity_raw(ptr uintptr, n uintptr, val32 uint32, val8 uint8, val
 // TrampolineSanityHash returns a 64-bit mix of the four arguments. Used by
 // tests to verify that trampolines marshal arguments verbatim.
 func TrampolineSanityHash(ptr *byte, length uintptr, v32 uint32, v8 uint8, v64 uint64, f64bits uint64, f32bits uint32) uintptr {
-	return trampoline_sanity_raw(ptr, length, v32, v8, v64, f64bits, f32bits)
+	return trampoline_sanity_raw(uintptr(unsafe.Pointer(ptr)), length, v32, v8, v64, f64bits, f32bits)
 }
 
 //simba:trampoline amd64 arm64
@@ -379,6 +379,6 @@ func trampoline_echo_raw(ptr uintptr, n uintptr, v32 uint32, v8 uint8, v64 uint6
 // TrampolineEcho calls the echo helper for debugging.
 func TrampolineEcho(ptr *byte, length uintptr, v32 uint32, v8 uint8, v64 uint64, f64bits uint64, f32bits uint32) Echo {
 	var e Echo
-	trampoline_echo_raw(ptr, length, v32, v8, v64, f64bits, f32bits, &e)
+	trampoline_echo_raw(uintptr(unsafe.Pointer(ptr)), length, v32, v8, v64, f64bits, f32bits, uintptr(unsafe.Pointer(&e)))
 	return e
 }
